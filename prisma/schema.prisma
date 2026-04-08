@@ -1,0 +1,83 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+}
+
+model User {
+  id            String         @id @default(uuid())
+  email         String         @unique
+  passwordHash  String
+  name          String?
+  role          Role           @default(USER)
+  travelDNA     Json?
+  
+  trips         Trip[]
+  expensesPaid  Expense[]      @relation("PayerExpenses")
+  expenseShares ExpenseShare[]
+}
+
+model Place {
+  id             String     @id @default(uuid())
+  name           String
+  lat            Float
+  lng            Float
+  category       String     // STAY, EAT, PLAY
+  estimatedCost  Float?
+  durationMinutes Int?
+  
+  tripItems      TripItem[]
+}
+
+model Trip {
+  id        String     @id @default(uuid())
+  userId    String
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  budget    Float?
+  startDate DateTime?
+  endDate   DateTime?
+  city      String?
+  
+  tripItems TripItem[]
+  expenses  Expense[]
+}
+
+model TripItem {
+  id         String   @id @default(uuid())
+  tripId     String
+  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  placeId    String
+  place      Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  date       DateTime?
+  orderIndex Int
+}
+
+model Expense {
+  id          String         @id @default(uuid())
+  tripId      String
+  trip        Trip           @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  title       String
+  totalAmount Float
+  payerId     String
+  payer       User           @relation("PayerExpenses", fields: [payerId], references: [id], onDelete: Cascade)
+  
+  shares      ExpenseShare[]
+}
+
+model ExpenseShare {
+  id          String  @id @default(uuid())
+  expenseId   String
+  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  userId      String
+  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountOwed  Float
+}

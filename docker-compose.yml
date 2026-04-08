@@ -1,0 +1,11 @@
+services:
+  db:
+    image: postgres:15-alpine
+    container_name: optiroute_db
+    restart: always
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: optiroute_db
