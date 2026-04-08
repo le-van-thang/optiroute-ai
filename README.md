@@ -28,29 +28,42 @@ OptiRoute AI là một ứng dụng web thông minh giúp người dùng tự đ
 ### Các bước chạy dự án cục bộ (Installation)
 
 1. **Clone repository:**
-   ```bash
-   git clone [https://github.com/le-van-thang/optiroute-ai.git](https://github.com/le-van-thang/optiroute-ai.git)
-   cd optiroute-ai
-Cài đặt thư viện:
+```bash
+git clone [https://github.com/le-van-thang/optiroute-ai.git](https://github.com/le-van-thang/optiroute-ai.git)
+cd optiroute-ai
+```
 
-Bash
+2. **Cài đặt thư viện:**
+```bash
 pnpm install
-Cấu hình biến môi trường:
+```
 
-Đổi tên file .env.example thành .env.
+3. **Cấu hình biến môi trường:**
+- Đổi tên file `.env.example` thành `.env`.
+- Cập nhật các thông tin kết nối Database và Auth Secret trong file `.env`.
 
-Cập nhật các thông tin kết nối Database và Auth Secret trong file .env.
-
-Khởi động Database (Docker):
-
-Bash
+4. **Khởi động Database (Docker):**
+```bash
 docker-compose up -d
-Đồng bộ Database (Prisma):
+```
 
-Bash
+5. **Đồng bộ Database (Prisma):**
+```bash
 pnpm run db:push
-Chạy ứng dụng:
+```
 
-Bash
+6. **Chạy ứng dụng:**
+```bash
 pnpm run dev
-Ứng dụng sẽ chạy tại: http://localhost:3000
+```
+Ứng dụng sẽ chạy tại: `http://localhost:3000`
+
+## 📁 Tài liệu tham khảo nội bộ
+Vui lòng tham khảo file `MASTER_PLAN.md` để xem cấu trúc chi tiết, sơ đồ thuật toán và lộ trình phát triển của dự án.
+```
+
+***
+
+Sau khi dán xong, bạn bấm nút **Preview** (Xem trước) ở trên GitHub. Đảm bảo 100% bạn sẽ thấy các dòng code màu đen tách biệt, chuyên nghiệp y như các dự án lớn. Khớp phát là bấm **Commit changes** (Lưu lại) là xong luôn. 
+
+Giao diện xong, code lưu GitHub xong, giờ bạn có muốn mình gọi Antigravity dậy để quất luôn Giai đoạn 4 (Thuật toán lõi) cho nóng không?
