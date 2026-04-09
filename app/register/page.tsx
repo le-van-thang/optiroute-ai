@@ -7,6 +7,7 @@ import { MoveRight, Mail, Lock, User, Loader2, Eye, EyeOff, Compass, CheckCircle
 import { motion, AnimatePresence } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
 import { AuthBackground } from "@/components/ui/AuthBackground";
+import { useToast } from "@/components/providers/ToastProvider";
 
 const translations = {
   vi: {
@@ -23,6 +24,7 @@ const translations = {
     successMsg: "Đăng ký thành công! Đang chuyển trang...",
     syncTitle: "Lịch trình thông minh",
     syncDesc: "Tham gia cùng hàng ngàn du khách sử dụng hệ thống lên lộ trình và chia tiền thế hệ mới.",
+    syncSubtitle: "Thiết kế chuyến đi hoàn hảo với AI.",
     errLength: "Mật khẩu phải có ít nhất 6 ký tự",
     errMatch: "Mật khẩu xác nhận không khớp"
   },
@@ -40,6 +42,7 @@ const translations = {
     successMsg: "Registration successful! Redirecting...",
     syncTitle: "Intelligent Planning",
     syncDesc: "Join thousands of travelers using next-generation routing and expense tracking.",
+    syncSubtitle: "Design your perfect journey with AI.",
     errLength: "Password must be at least 6 characters",
     errMatch: "Passwords do not match"
   }
@@ -54,6 +57,7 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const { showToast } = useToast();
 
   const t = translations[lang];
 
@@ -63,13 +67,13 @@ export default function RegisterPage() {
     setError("");
 
     if (formData.password.length < 6) {
-      setError(t.errLength);
+      showToast(t.errLength, "error");
       setIsLoading(false);
       return;
     }
 
     if (formData.password !== formData.confirmPassword) {
-      setError(t.errMatch);
+      showToast(t.errMatch, "error");
       setIsLoading(false);
       return;
     }
@@ -94,12 +98,12 @@ export default function RegisterPage() {
       }
 
       setIsSuccess(true);
-      setMessage(t.successMsg);
+      showToast(t.successMsg, "success");
       setTimeout(() => {
         router.push("/login?registered=true");
       }, 1000);
     } catch (err: any) {
-      setError(err.message);
+      showToast(err.message, "error");
       setIsLoading(false);
     }
   };
@@ -111,7 +115,7 @@ export default function RegisterPage() {
         initial={{ opacity: 0 }} 
         animate={{ opacity: 1 }} 
         transition={{ duration: 1 }}
-        className="hidden lg:flex lg:w-1/2 relative bg-[#020817] overflow-hidden justify-center items-center h-full"
+        className="hidden lg:flex lg:w-1/2 relative bg-[#020817] overflow-hidden justify-center items-center h-screen border-r border-white/5"
       >
         <AuthBackground />
 
@@ -122,8 +126,14 @@ export default function RegisterPage() {
         {/* Backdrop Art (Grid/Mock UI) */}
         <motion.div 
           initial={{ y: 20, opacity: 0 }}
-          animate={{ y: 0, opacity: 1 }}
-          transition={{ delay: 0.3, duration: 0.7 }}
+          animate={{ 
+            y: [0, -10, 0], 
+            opacity: 1 
+          }}
+          transition={{ 
+            opacity: { duration: 0.7, delay: 0.3 },
+            y: { duration: 4, repeat: Infinity, ease: "easeInOut" }
+          }}
           className="relative z-20 p-12 text-center max-w-lg"
         >
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-emerald-300 mb-8 backdrop-blur-sm shadow-xl shadow-emerald-900/20">
@@ -131,7 +141,7 @@ export default function RegisterPage() {
             {t.syncTitle}
           </div>
           <h2 className="text-4xl md:text-5xl font-extrabold text-white tracking-tight mb-6 leading-tight">
-            Design your perfect journey with AI.
+            {t.syncSubtitle}
           </h2>
           <p className="text-lg text-cyan-100/70 leading-relaxed">
             {t.syncDesc}
@@ -140,7 +150,7 @@ export default function RegisterPage() {
       </motion.div>
 
       {/* Right Column - Form */}
-      <div className="w-full lg:w-1/2 flex flex-col justify-center px-6 sm:px-10 relative">
+      <div className="w-full lg:w-1/2 flex flex-col justify-center items-center px-6 sm:px-10 relative overflow-y-auto">
         <motion.div 
           initial={{ opacity: 0, x: 20 }} 
           animate={{ opacity: 1, x: 0 }} 
@@ -153,31 +163,7 @@ export default function RegisterPage() {
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
-            <AnimatePresence mode="popLayout">
-              {message && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0, y: -10 }} 
-                  animate={{ opacity: 1, height: "auto", y: 0 }} 
-                  exit={{ opacity: 0, height: 0 }}
-                  className="p-3 text-sm text-emerald-300 bg-emerald-950/40 border border-emerald-900/50 rounded-lg flex items-center gap-2 overflow-hidden"
-                >
-                  <CheckCircle2 className="h-4 w-4 text-emerald-400 flex-shrink-0" />
-                  {message}
-                </motion.div>
-              )}
-
-              {error && (
-                <motion.div 
-                  initial={{ opacity: 0, height: 0, y: -10 }} 
-                  animate={{ opacity: 1, height: "auto", y: 0 }} 
-                  exit={{ opacity: 0, height: 0 }}
-                  className="p-3 text-sm text-rose-300 bg-rose-950/40 border border-rose-900/50 rounded-lg flex items-center gap-2 overflow-hidden"
-                >
-                  <span className="w-1.5 h-1.5 rounded-full bg-rose-400 flex-shrink-0"></span>
-                  {error}
-                </motion.div>
-              )}
-            </AnimatePresence>
+            {/* Local alerts removed in favor of global Toasts */}
 
             <div className="space-y-3">
               <div className="relative group">

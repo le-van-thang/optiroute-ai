@@ -8,6 +8,8 @@ export default withAuth(
     const isAuthPage = req.nextUrl.pathname.startsWith("/login") || req.nextUrl.pathname.startsWith("/register");
     const isAdminRoute = req.nextUrl.pathname.startsWith("/admin");
     const isDashboardRoute = req.nextUrl.pathname.startsWith("/dashboard");
+    const isItineraryRoute = req.nextUrl.pathname.startsWith("/itinerary");
+    const isSplitBillRoute = req.nextUrl.pathname.startsWith("/split-bill");
 
     if (isAuthPage) {
       if (isAuth) {
@@ -16,7 +18,7 @@ export default withAuth(
       return null;
     }
 
-    if (!isAuth && (isAdminRoute || isDashboardRoute)) {
+    if (!isAuth && (isAdminRoute || isDashboardRoute || isItineraryRoute || isSplitBillRoute)) {
       let from = req.nextUrl.pathname;
       if (req.nextUrl.search) {
         from += req.nextUrl.search;
@@ -45,5 +47,5 @@ export default withAuth(
 );
 
 export const config = {
-  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register"],
+  matcher: ["/dashboard/:path*", "/admin/:path*", "/login", "/register", "/itinerary/:path*", "/split-bill/:path*"],
 };
