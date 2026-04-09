@@ -4,10 +4,14 @@ import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const BACKGROUND_IMAGES = [
-  "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80", // Mountains
-  "https://images.unsplash.com/photo-1502602861623-289b4e727f71?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80", // Paris
-  "https://images.unsplash.com/photo-1493976040374-85c8e12f0c0e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80", // Tokyo
-  "https://images.unsplash.com/photo-1512100356356-de1b8b209d0c?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80", // Maldives
+  "https://images.unsplash.com/photo-1501785888041-af3ef285b470?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1476514525535-07fb3b4ae5f1?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1527631746610-bca00a040d60?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1507525428034-b723cf961d3e?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1533105079780-92b9be482077?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1542332213-9b5a5a3fad35?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1510414842594-a61c69b5ae57?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
+  "https://images.unsplash.com/photo-1469854523086-cc02fe5d8800?ixlib=rb-4.0.3&auto=format&fit=crop&w=2000&q=80",
 ];
 
 export function AuthBackground() {
@@ -23,15 +27,14 @@ export function AuthBackground() {
   return (
     <div className="absolute inset-0 w-full h-full z-0 overflow-hidden bg-black">
       <AnimatePresence mode="popLayout">
-        <motion.img
+        <motion.div
           key={currentIndex}
-          src={BACKGROUND_IMAGES[currentIndex]}
-          alt="Travel Destination"
           initial={{ opacity: 0, scale: 1.05 }}
           animate={{ opacity: 0.8, scale: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 1.5, ease: "easeInOut" }}
-          className="absolute inset-0 w-full h-full object-cover"
+          className="absolute inset-0 w-full h-full bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: `url(${BACKGROUND_IMAGES[currentIndex]})` }}
         />
       </AnimatePresence>
       <div className="absolute inset-0 bg-gradient-to-t from-[#020817] via-[#020817]/20 to-transparent" />

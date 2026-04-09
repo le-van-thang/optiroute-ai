@@ -6,10 +6,35 @@ import { usePathname } from "next/navigation";
 import { MapIcon, Receipt, Route, LayoutDashboard, LogOut, User } from "lucide-react";
 import { useLang } from "@/components/providers/LangProvider";
 
+const translations = {
+  vi: {
+    dashboard: "Bảng điều khiển",
+    itinerary: "Lịch trình",
+    splitBill: "Chia tiền",
+    admin: "Quản trị",
+    user: "Người dùng",
+    logout: "Đăng xuất",
+    signIn: "Đăng nhập",
+    getStarted: "Bắt đầu ngay"
+  },
+  en: {
+    dashboard: "Dashboard",
+    itinerary: "Itinerary",
+    splitBill: "Split-Bill",
+    admin: "Admin",
+    user: "User",
+    logout: "Logout",
+    signIn: "Sign In",
+    getStarted: "Get Started"
+  }
+};
+
 export function Navbar() {
   const { data: session, status } = useSession();
   const pathname = usePathname();
   const { lang, setLang } = useLang();
+  
+  const t = translations[lang];
 
   const isActive = (path: string) => pathname?.startsWith(path);
 
@@ -40,7 +65,7 @@ export function Navbar() {
                   }`}
                 >
                   <LayoutDashboard className="h-4 w-4" />
-                  Dashboard
+                  {t.dashboard}
                 </Link>
                 <Link
                   href="/itinerary"
@@ -51,7 +76,7 @@ export function Navbar() {
                   }`}
                 >
                   <Route className="h-4 w-4" />
-                  Smart Itinerary
+                  {t.itinerary}
                 </Link>
                 <Link
                   href="/split-bill"
@@ -62,7 +87,7 @@ export function Navbar() {
                   }`}
                 >
                   <Receipt className="h-4 w-4" />
-                  Split-Bill
+                  {t.splitBill}
                 </Link>
               </>
             )}
@@ -107,21 +132,21 @@ export function Navbar() {
                     className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 rounded-md text-sm font-medium transition-colors border border-rose-500/20"
                   >
                     <LayoutDashboard className="h-4 w-4" />
-                    Admin
+                    {t.admin}
                   </Link>
                 )}
                 <div className="hidden sm:flex items-center gap-2 text-sm text-gray-300 pl-2 border-l border-white/10">
                   <div className="h-8 w-8 rounded-full bg-indigo-900/50 flex items-center justify-center border border-indigo-500/30">
                     <User className="h-4 w-4 text-indigo-300" />
                   </div>
-                  <span className="font-medium truncate max-w-[100px]">{session.user?.name || "User"}</span>
+                  <span className="font-medium truncate max-w-[100px]">{session.user?.name || t.user}</span>
                 </div>
                 <button
                   onClick={() => signOut({ callbackUrl: "/" })}
                   className="flex items-center gap-2 text-sm font-medium text-red-500 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-md transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
-                  Logout
+                  {t.logout}
                 </button>
               </div>
             ) : (
@@ -130,13 +155,13 @@ export function Navbar() {
                   href="/login"
                   className="text-sm font-medium text-gray-300 hover:text-white px-3 py-2 transition-colors"
                 >
-                  Sign In
+                  {t.signIn}
                 </Link>
                 <Link
                   href="/register"
                   className="text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md transition-colors shadow-lg shadow-indigo-500/20"
                 >
-                  Get Started
+                  {t.getStarted}
                 </Link>
               </div>
             )}
