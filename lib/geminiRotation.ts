@@ -4,7 +4,7 @@
  * Automatically rotates to next key on rate limit (429/503) errors.
  */
 
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, Part } from "@google/generative-ai";
 
 // Collect all valid keys from env (supports GEMINI_API_KEY_1 to GEMINI_API_KEY_20)
 function getApiKeys(): string[] {
@@ -19,8 +19,8 @@ function getApiKeys(): string[] {
 }
 
 // Check if an error is a quota/rate-limit/overload error
-function isQuotaError(error: any): boolean {
-  const msg = (error?.message || "").toLowerCase();
+function isQuotaError(error: unknown): boolean {
+  const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return (
     msg.includes("429") ||
     msg.includes("503") ||
@@ -34,10 +34,10 @@ function isQuotaError(error: any): boolean {
 
 interface GeminiRequest {
   modelName?: string;
-  systemInstruction: any;
-  history: any[];
+  systemInstruction?: Content | string;
+  history?: Content[];
   message: string;
-  imagePart?: any;
+  imagePart?: Part;
 }
 
 /**
@@ -45,11 +45,16 @@ interface GeminiRequest {
  * Tries each API key in sequence until one succeeds.
  */
 export async function generateWithRotation(params: GeminiRequest): Promise<string> {
-  const keys = getApiKeys();
+  const allKeys = getApiKeys();
 
-  if (keys.length === 0) {
+  if (allKeys.length === 0) {
     throw new Error("Không tìm thấy GEMINI_API_KEY nào hợp lệ trong file .env");
   }
+
+  // Load Balancing: Randomize the starting key index to distribute traffic
+  // evenly across all available projects before hitting rate limits.
+  const startIndex = Math.floor(Math.random() * allKeys.length);
+  const keys = [...allKeys.slice(startIndex), ...allKeys.slice(0, startIndex)];
 
   let lastError: any = null;
 
@@ -80,8 +85,8 @@ export async function generateWithRotation(params: GeminiRequest): Promise<strin
       console.log(`[Gemini Rotation] ${keyLabel} thành công!`);
       return result.response.text();
 
-    } catch (error: any) {
-      lastError = error;
+    } catch (error: unknown) {
+      lastError = error instanceof Error ? error : new Error(String(error));
 
       if (isQuotaError(error)) {
         console.warn(`[Gemini Rotation] ${keyLabel} bị rate limit/overload → thử key tiếp theo...`);
@@ -95,9 +100,10 @@ export async function generateWithRotation(params: GeminiRequest): Promise<strin
   }
 
   // All keys exhausted
+  const finalErrorMessage = lastError instanceof Error ? lastError.message : String(lastError);
   throw new Error(
     `Tất cả ${keys.length} API key đều đã hết quota hoặc bị overload. ` +
     `Vui lòng thêm key mới hoặc thử lại sau vài phút. ` +
-    `(Lỗi cuối: ${lastError?.message})`
+    `(Lỗi cuối: ${finalErrorMessage})`
   );
 }

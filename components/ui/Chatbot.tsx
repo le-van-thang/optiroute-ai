@@ -1,13 +1,14 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { MessageSquare, X, Send, Bot, User, Loader2, Sparkles, ImagePlus, Mic, Plus, Trash2, LogIn, History, ChevronLeft } from "lucide-react";
+import { X, Send, Bot, User, Loader2, Sparkles, ImagePlus, Mic, Plus, LogIn, History, ChevronLeft } from "lucide-react";
 import ReactMarkdown from "react-markdown";
 import { useSession } from "next-auth/react";
 import { useLang } from "@/components/providers/LangProvider";
 import { findGuestAnswer, GUEST_SUGGESTIONS } from "@/lib/guestFAQ";
 import Link from "next/link";
+import Image from "next/image";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 interface Message {
@@ -67,8 +68,8 @@ function loadHistory(): ChatSession[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    return parsed.map((s: any) => ({ ...s, createdAt: new Date(s.createdAt) }));
+    const parsed = JSON.parse(raw) as ChatSession[];
+    return parsed.map((s) => ({ ...s, createdAt: new Date(s.createdAt) }));
   } catch { return []; }
 }
 
@@ -118,7 +119,7 @@ export function Chatbot() {
 
   // ── Active session messages
   const activeSession = sessions.find(s => s.id === activeSessionId);
-  const messages: Message[] = activeSession?.messages ?? [];
+  const messages = useMemo(() => activeSession?.messages ?? [], [activeSession]);
 
   // ── Scroll to bottom on new messages
   useEffect(() => {
@@ -229,30 +230,41 @@ export function Chatbot() {
         appendMessage({ role: "bot", text: answer });
       } else {
         // ── AUTH MODE: Real Gemini API
-        // Gemini history MUST alternate: user -> model -> user ... and MUST start with 'user'
-        const rawHistory = messages.filter(m => m.text !== welcomeText && m.role);
-        
-        // Find the first 'user' message to start the history correctly
-        const firstUserIdx = rawHistory.findIndex(m => m.role === "user");
+        // Context Awareness: Get current itinerary and province from storage
+        const currentProvince = localStorage.getItem("optiroute_selected_province");
+        const currentItin = sessionStorage.getItem("optiroute_current_itinerary");
+
+        // Gemini history MUST alternate: user -> model ...
+        const rawHistory = messages.filter((m: Message) => m.text !== welcomeText && m.role);
+        const firstUserIdx = rawHistory.findIndex((m: Message) => m.role === "user");
         const historyPayload = firstUserIdx !== -1 
-          ? rawHistory.slice(firstUserIdx).map(m => ({ 
+          ? rawHistory.slice(firstUserIdx).map((m: Message) => ({ 
               role: m.role === "bot" ? "model" : "user", 
-              text: m.text 
+              parts: [{ text: m.text }]
             }))
           : [];
 
         const res = await fetch("/api/ai/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: userMessage, history: historyPayload, image: imgToSend }),
+          body: JSON.stringify({ 
+            message: userMessage, 
+            history: historyPayload, 
+            image: imgToSend,
+            context: {
+              province: currentProvince,
+              itinerary: currentItin ? JSON.parse(currentItin) : null
+            }
+          }),
         });
 
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Lỗi AI");
         appendMessage({ role: "bot", text: data.reply });
       }
-    } catch (err: any) {
-      appendMessage({ role: "bot", text: `⚠️ Hệ thống gặp lỗi: ${err.message}` });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      appendMessage({ role: "bot", text: `⚠️ Hệ thống gặp lỗi: ${msg}` });
     } finally {
       setIsTyping(false);
     }
@@ -274,12 +286,12 @@ export function Chatbot() {
 
     recognition.onstart = () => setIsListening(true);
     
-    recognition.onresult = (event: any) => {
+    recognition.onresult = (event: { results: { [key: number]: { [key: number]: { transcript: string } } } }) => {
       const transcript = event.results[0][0].transcript;
       setInput(prev => prev + (prev ? " " : "") + transcript);
     };
 
-    recognition.onerror = (event: any) => {
+    recognition.onerror = (event: { error: string }) => {
       console.error("Speech Recognition Error:", event.error);
       setIsListening(false);
       if (event.error === "not-allowed") {
@@ -398,7 +410,7 @@ export function Chatbot() {
                 <motion.div key="chat" initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="flex-1 flex flex-col min-h-0">
                   {/* ── Messages ── */}
                   <div ref={scrollRef} className="flex-1 overflow-y-auto p-5 space-y-5 scroll-smooth custom-scrollbar">
-                    {messages.map((msg, idx) => (
+                    {messages.map((msg: Message, idx: number) => (
                       <motion.div 
                         layout
                         initial={{ opacity: 0, y: 15, scale: 0.9 }} 
@@ -412,8 +424,14 @@ export function Chatbot() {
                           </div>
                           <div className={`text-sm py-2.5 px-4 rounded-2xl leading-relaxed prose prose-invert prose-p:my-1 prose-ul:my-1 prose-ol:my-1 max-w-full overflow-hidden ${msg.role === "user" ? "bg-gradient-to-br from-indigo-600 to-indigo-700 text-white rounded-tr-sm shadow-md" : "bg-[#131e42] border border-white/5 text-gray-200 rounded-tl-sm shadow-md"}`}>
                             {msg.image && (
-                              <div className="mb-2 rounded-lg overflow-hidden border border-white/20">
-                                <img src={msg.image} alt="attachment" className="w-full h-auto max-h-[150px] object-cover" />
+                              <div className="mb-2 rounded-lg overflow-hidden border border-white/20 relative h-[150px] w-full">
+                                <Image 
+                                  src={msg.image} 
+                                  alt="attachment" 
+                                  fill 
+                                  className="object-cover"
+                                  unoptimized
+                                />
                               </div>
                             )}
                             {msg.role === "user" ? msg.text : <ReactMarkdown>{msg.text}</ReactMarkdown>}
@@ -429,10 +447,10 @@ export function Chatbot() {
                           <div className="shrink-0 w-8 h-8 flex items-center justify-center rounded-full mt-1 bg-cyan-700/50 border border-cyan-500/30">
                             <Bot className="w-4 h-4 text-cyan-200" />
                           </div>
-                          <div className="bg-[#131e42] border border-white/5 py-3 px-4 rounded-2xl rounded-tl-sm flex gap-1.5 items-center">
-                            <motion.div className="w-2 h-2 bg-cyan-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0 }} />
-                            <motion.div className="w-2 h-2 bg-cyan-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.2 }} />
-                            <motion.div className="w-2 h-2 bg-cyan-500 rounded-full" animate={{ y: [0, -5, 0] }} transition={{ repeat: Infinity, duration: 0.6, delay: 0.4 }} />
+                          <div className="bg-slate-900 border border-border py-3 px-4 rounded-2xl rounded-tl-sm flex gap-1.5 items-center">
+                            <motion.div className="w-1.5 h-1.5 bg-slate-500 rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0 }} />
+                            <motion.div className="w-1.5 h-1.5 bg-slate-500 rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0.2 }} />
+                            <motion.div className="w-1.5 h-1.5 bg-slate-500 rounded-full" animate={{ opacity: [0.3, 1, 0.3] }} transition={{ repeat: Infinity, duration: 1, delay: 0.4 }} />
                           </div>
                         </div>
                       </motion.div>
@@ -450,10 +468,10 @@ export function Chatbot() {
                           <motion.button
                             layout
                             key={i}
-                            whileHover={{ scale: 1.05, backgroundColor: "rgba(34, 211, 238, 0.15)" }}
+                            whileHover={{ scale: 1.05, backgroundColor: "rgba(255, 255, 255, 0.05)" }}
                             whileTap={{ scale: 0.95 }}
                             onClick={() => handleSend(undefined, p)}
-                            className="px-4 py-2 bg-white/5 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-500/40 rounded-full text-xs text-gray-300 transition-all font-medium shadow-sm"
+                            className="px-4 py-2 bg-slate-900 border border-border rounded-full text-xs text-slate-400 transition-all font-medium shadow-sm"
                           >
                             {p}
                           </motion.button>
@@ -464,15 +482,17 @@ export function Chatbot() {
 
                   {/* Guest Login CTA */}
                   {!isAuth && (
-                    <div className="px-4 py-2 bg-gradient-to-r from-indigo-900/50 to-cyan-900/30 border-t border-indigo-500/20 flex items-center justify-between gap-2 shrink-0">
-                      <p className="text-xs text-gray-400">Đăng nhập để dùng AI thực tế với dữ liệu của bạn</p>
-                      <Link
-                        href="/login"
-                        className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-cyan-600 to-indigo-600 text-white text-xs font-semibold rounded-lg hover:opacity-90 transition-opacity shrink-0"
-                      >
-                        <LogIn className="w-3 h-3" />
-                        Đăng nhập
-                      </Link>
+                    <div className="px-4 py-2 bg-slate-900 border-t border-border flex items-center justify-between gap-2 shrink-0">
+                      <p className="text-[10px] text-slate-500 font-medium">Đăng nhập để dùng AI với dữ liệu của bạn</p>
+                      <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                        <Link
+                          href="/login"
+                          className="flex items-center gap-1.5 px-3 py-1.5 bg-foreground text-background text-[10px] font-black rounded-lg transition-opacity shrink-0"
+                        >
+                          <LogIn className="w-3 h-3" />
+                          Đăng nhập
+                        </Link>
+                      </motion.div>
                     </div>
                   )}
 
@@ -486,7 +506,15 @@ export function Chatbot() {
                   className="absolute bottom-20 left-4 z-20"
                 >
                   <div className="relative p-1 bg-[#131e42]/90 border border-cyan-500/40 rounded-xl shadow-2xl backdrop-blur-md">
-                    <img src={selectedImage} alt="Preview" className="h-12 w-12 object-cover rounded-lg" />
+                    <div className="relative h-12 w-12 overflow-hidden rounded-lg">
+                      <Image 
+                        src={selectedImage} 
+                        alt="Preview" 
+                        fill 
+                        className="object-cover" 
+                        unoptimized
+                      />
+                    </div>
                     <button 
                       type="button" 
                       onClick={() => setSelectedImage(null)} 
@@ -504,45 +532,46 @@ export function Chatbot() {
                   <input type="file" accept="image/*" ref={fileInputRef} onChange={handleImageUpload} className="hidden" />
 
                   {/* ── Input ── */}
-                  <form onSubmit={(e) => handleSend(e)} className="p-3 bg-[#0a1128] border-t border-white/5 shrink-0">
-                    <div className="relative flex items-center bg-[#050b1a] border border-white/10 rounded-2xl p-1 focus-within:border-cyan-500/50 focus-within:ring-1 focus-within:ring-cyan-500/50 shadow-inner overflow-hidden transition-all">
+                  <form onSubmit={(e) => handleSend(e)} className="p-4 bg-slate-950 border-t border-border shrink-0">
+                    <div className="relative flex items-center bg-slate-900 border border-border rounded-2xl p-1 focus-within:ring-1 focus-within:ring-slate-500/50 shadow-inner overflow-hidden transition-all">
                       <div className="flex items-center space-x-1 pl-1">
                         {isAuth && (
-                          <button type="button" onClick={() => fileInputRef.current?.click()} className="p-2 text-gray-400 hover:text-cyan-400 bg-white/0 hover:bg-white/5 rounded-full transition-colors flex-shrink-0" title="Đính kèm ảnh">
+                          <motion.button 
+                            whileHover={{ scale: 1.1 }}
+                            whileTap={{ scale: 0.9 }}
+                            type="button" 
+                            onClick={() => fileInputRef.current?.click()} 
+                            className="p-2 text-slate-500 hover:text-slate-300 transition-colors flex-shrink-0"
+                          >
                             <ImagePlus className="w-4 h-4" />
-                          </button>
+                          </motion.button>
                         )}
-                        <button 
+                        <motion.button 
+                          whileHover={{ scale: 1.1 }}
+                          whileTap={{ scale: 0.9 }}
                           type="button" 
                           onClick={startVoiceInput} 
-                          className={`p-2 rounded-full transition-all flex-shrink-0 relative ${isListening ? "text-emerald-500 bg-emerald-500/10" : "text-gray-400 hover:text-emerald-400 bg-white/0 hover:bg-white/5"}`}
+                          className={`p-2 rounded-full transition-all flex-shrink-0 relative ${isListening ? "text-rose-500 bg-rose-500/10" : "text-slate-500 hover:text-slate-300"}`}
                         >
                           <Mic className={`w-4 h-4 ${isListening ? "animate-pulse" : ""}`} />
-                          {isListening && (
-                            <motion.div 
-                              layoutId="listening-ring"
-                              initial={{ scale: 0.8, opacity: 0 }}
-                              animate={{ scale: 1.5, opacity: 0 }}
-                              transition={{ duration: 1, repeat: Infinity }}
-                              className="absolute inset-0 rounded-full bg-emerald-500/30"
-                            />
-                          )}
-                        </button>
+                        </motion.button>
                       </div>
                       <input
                         type="text"
                         value={input}
                         onChange={(e) => setInput(e.target.value)}
                         placeholder={t.placeholder}
-                        className="flex-1 bg-transparent py-2.5 px-2 text-sm text-white placeholder:text-gray-600 focus:outline-none min-w-0"
+                        className="flex-1 bg-transparent py-2.5 px-2 text-sm text-foreground placeholder:text-slate-600 focus:outline-none min-w-0"
                       />
-                      <button
+                      <motion.button
+                        whileHover={{ scale: 1.05 }}
+                        whileTap={{ scale: 0.95 }}
                         type="submit"
                         disabled={(!input.trim() && !selectedImage) || isTyping}
-                        className="p-2.5 mr-1 bg-gradient-to-br from-cyan-600 to-indigo-600 text-white rounded-xl disabled:opacity-40 disabled:grayscale transition-all hover:scale-105 active:scale-95 flex-shrink-0"
+                        className="p-2.5 mr-1 bg-foreground text-background rounded-xl disabled:opacity-40 transition-all flex-shrink-0"
                       >
                         {isTyping ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4" />}
-                      </button>
+                      </motion.button>
                     </div>
                   </form>
                 </motion.div>
