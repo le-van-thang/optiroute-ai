@@ -10,53 +10,11 @@ import { useLang } from "@/components/providers/LangProvider";
 import { AuthBackground } from "@/components/ui/AuthBackground";
 import { useToast } from "@/components/providers/ToastProvider";
 
-const translations = {
-  vi: {
-    welcomeTitle: "Chào mừng trở lại",
-    welcomeDesc: "Đăng nhập vào tài khoản OptiRoute AI để tiếp tục.",
-    emailPlaceholder: "name@example.com",
-    pwdPlaceholder: "Mật khẩu",
-    remember: "Ghi nhớ đăng nhập",
-    forgot: "Quên mật khẩu?",
-    signInBtn: "Đăng nhập",
-    signingIn: "Đang xử lý...",
-    orContinue: "Hoặc tiếp tục với",
-    noAccount: "Chưa có tài khoản?",
-    signUp: "Đăng ký ngay",
-    successMsg: "Đăng nhập thành công! Đang chuyển hướng...",
-    invalidMsg: "Email hoặc mật khẩu không chính xác.",
-    syncTitle: "Hành trình đồng bộ",
-    syncDesc: "Lên kế hoạch thông minh, chia tiền nhanh gọn. Trợ lý du lịch của bạn được đồng bộ trên mọi thiết bị.",
-    syncSubtitle: "Quyền truy cập liền mạch vào các lịch trình của bạn.",
-    resetSent: "Mật khẩu mới đã được gửi về email của bạn!",
-    regSuccess: "Tạo tài khoản thành công! Vui lòng đăng nhập."
-  },
-  en: {
-    welcomeTitle: "Welcome back",
-    welcomeDesc: "Log in to your OptiRoute AI account to continue.",
-    emailPlaceholder: "name@example.com",
-    pwdPlaceholder: "Password",
-    remember: "Remember me",
-    forgot: "Forgot password?",
-    signInBtn: "Sign in",
-    signingIn: "Signing in...",
-    orContinue: "Or continue with",
-    noAccount: "Don't have an account?",
-    signUp: "Sign up",
-    successMsg: "Sign in successful! Redirecting...",
-    invalidMsg: "Invalid email or password.",
-    syncTitle: "Synchronized Journeys",
-    syncDesc: "Plan globally, split locally. Your smart travel companion synchronized across all your devices.",
-    syncSubtitle: "Seamless access to your itineraries.",
-    resetSent: "Recovery instructions have been sent to your email!",
-    regSuccess: "Account created successfully! Please sign in."
-  }
-};
-
 export default function LoginPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const { lang } = useLang();
+  const { lang, t } = useLang();
+  const authT = t.auth;
   const [formData, setFormData] = useState({ email: "", password: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -67,14 +25,12 @@ export default function LoginPage() {
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isFacebookLoading, setIsFacebookLoading] = useState(false);
 
-  const t = translations[lang];
-
   useEffect(() => {
     if (searchParams?.get("registered") === "true") {
-      setMessage(t.regSuccess);
+      setMessage(authT.regSuccess);
     }
     if (searchParams?.get("error")) {
-      setError(t.invalidMsg);
+      setError(authT.invalidMsg);
     }
   }, [searchParams, lang]);
 
@@ -92,10 +48,10 @@ export default function LoginPage() {
 
     if (res?.error) {
       setIsLoading(false);
-      showToast(t.invalidMsg, "error");
+      showToast(authT.invalidMsg, "error");
     } else {
       setIsSuccess(true);
-      showToast(t.successMsg, "success");
+      showToast(authT.successMsg, "success");
       // Wait a moment for the animation before fully redirecting
       setTimeout(() => {
         router.push("/dashboard");
@@ -113,7 +69,7 @@ export default function LoginPage() {
 
   const handleForgotPassword = (e: React.MouseEvent) => {
     e.preventDefault();
-    setMessage(t.resetSent);
+    setMessage(authT.resetSent);
     setError("");
   };
 
@@ -128,8 +84,8 @@ export default function LoginPage() {
           className="w-full max-w-[360px] mx-auto space-y-4 relative z-10 py-8"
         >
           <div className="text-left mb-6">
-            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">{t.welcomeTitle}</h1>
-            <p className="text-gray-400 text-sm">{t.welcomeDesc}</p>
+            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">{authT.welcomeTitle}</h1>
+            <p className="text-gray-400 text-sm">{authT.welcomeDesc}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
@@ -147,7 +103,7 @@ export default function LoginPage() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={t.emailPlaceholder}
+                  placeholder={authT.emailPlaceholder}
                 />
               </div>
 
@@ -162,7 +118,7 @@ export default function LoginPage() {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={t.pwdPlaceholder}
+                  placeholder={authT.pwdPlaceholder}
                 />
                 <button
                   type="button"
@@ -183,13 +139,13 @@ export default function LoginPage() {
                   className="h-4 w-4 text-cyan-600 focus:ring-cyan-500 border-gray-800 rounded bg-[#0a1128]"
                 />
                 <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-400 select-none">
-                  {t.remember}
+                  {authT.remember}
                 </label>
               </div>
 
               <div className="text-sm">
                 <button onClick={handleForgotPassword} type="button" className="font-medium text-cyan-400 hover:text-cyan-300 transition-colors">
-                  {t.forgot}
+                  {authT.forgot}
                 </button>
               </div>
             </div>
@@ -204,11 +160,11 @@ export default function LoginPage() {
               {(isLoading || isSuccess) ? (
                 <>
                   <Loader2 className="animate-spin h-5 w-5 text-white mr-2" />
-                  {t.signingIn}
+                  {authT.signingIn}
                 </>
               ) : (
                 <>
-                  {t.signInBtn}
+                  {authT.signInBtn}
                   <MoveRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
@@ -221,7 +177,7 @@ export default function LoginPage() {
                 <div className="w-full border-t border-gray-800"></div>
               </div>
               <div className="relative flex justify-center text-sm">
-                <span className="px-2 bg-[#020817] text-gray-500">{t.orContinue}</span>
+                <span className="px-2 bg-[#020817] text-gray-500">{authT.orContinue}</span>
               </div>
             </div>
 
@@ -262,9 +218,9 @@ export default function LoginPage() {
           </div>
 
           <p className="mt-4 text-center text-sm text-gray-400">
-            {t.noAccount}{" "}
+            {authT.noAccount}{" "}
             <Link href="/register" className="font-semibold text-cyan-400 hover:text-cyan-300 transition-colors">
-              {t.signUp}
+              {authT.signUp}
             </Link>
           </p>
         </motion.div>
@@ -298,13 +254,13 @@ export default function LoginPage() {
         >
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-emerald-300 mb-8 backdrop-blur-sm shadow-xl shadow-emerald-900/20">
             <MapPin className="h-4 w-4 text-emerald-400" />
-            {t.syncTitle}
+            {authT.syncTitle}
           </div>
           <h2 className="text-4xl md:text-5xl font-extrabold text-white tracking-tight mb-6 leading-tight">
-            {t.syncSubtitle}
+            {authT.syncSubtitle}
           </h2>
           <p className="text-lg text-cyan-100/70 leading-relaxed">
-            {t.syncDesc}
+            {authT.syncDesc}
           </p>
         </motion.div>
       </motion.div>

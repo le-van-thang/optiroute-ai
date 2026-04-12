@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/prisma";
+import { Trip, Expense } from "@prisma/client";
 import { generateWithRotation } from "@/lib/geminiRotation";
+import { Content } from "@google/generative-ai";
 
 export async function POST(req: Request) {
   try {
@@ -11,7 +13,13 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { message, history = [], image } = await req.json();
+    const body = await req.json();
+    const { message, history = [], image, context }: { 
+      message?: string, 
+      history?: any[], 
+      image?: string,
+      context?: { province: string | null, itinerary: any[] | null }
+    } = body;
     if (!message && !image) {
       return NextResponse.json({ error: "Missing message or image" }, { status: 400 });
     }
@@ -40,12 +48,15 @@ export async function POST(req: Request) {
       take: 20
     });
 
-    const totalSpent = expenses.reduce((acc, exp) => acc + exp.totalAmount, 0);
+    const totalSpent = expenses.reduce((acc: number, exp: Expense) => acc + exp.totalAmount, 0);
 
     const contextStr = `
     DỮ LIỆU CỦA NGƯỜI DÙNG HIỆN TẠI (Tên: ${session.user.name}):
-    - Chuyến đi đã tạo (${trips.length}): ${trips.map(t => `"${t.title}" tại ${t.city}`).join(" | ") || "Chưa có"}
-    - Các khoản chi tiêu gần đây: ${expenses.map(e => `[${e.title}: ${e.totalAmount.toLocaleString()} VND]`).join(", ") || "Chưa ghi nhận tiêu xài."}
+    - TỈNH THÀNH ĐANG CHỌN (TRÊN BẢN ĐỒ): ${context?.province || "Chưa xác định"}
+    - LỊCH TRÌNH LIVE (đang hiển thị): ${context?.itinerary ? JSON.stringify(context.itinerary) : "Chưa có lịch trình nào đang mở."}
+    
+    - Chuyến đi trong database (${trips.length}): ${trips.map((t: Trip) => `"${t.title}" tại ${t.city}`).join(" | ") || "Chưa có"}
+    - Các khoản chi tiêu gần đây: ${expenses.map((e: Expense) => `[${e.title}: ${e.totalAmount.toLocaleString()} VND]`).join(", ") || "Chưa ghi nhận tiêu xài."}
     - TỔNG CHI TIÊU HIỆN TẠI CỦA TÀI KHOẢN NÀY LÀ: ${totalSpent.toLocaleString()} VND.
     `;
 
@@ -112,7 +123,7 @@ export async function POST(req: Request) {
     `;
 
     // 2. Use rotation-aware Gemini call
-    let imagePart = null;
+    let imagePart: any = undefined;
     if (image) {
       const mimeType = image.substring(image.indexOf(":")+1, image.indexOf(";"));
       const base64Data = image.split(",")[1];
@@ -126,16 +137,17 @@ export async function POST(req: Request) {
       },
       history: history.map((msg: any) => ({
         role: msg.role === 'user' ? 'user' : 'model',
-        parts: [{ text: msg.text }],
+        parts: [{ text: msg.text || " " }],
       })),
       message: message || "Vui lòng phân tích ảnh này.",
-      imagePart
+      imagePart: imagePart || undefined
     });
 
     return NextResponse.json({ reply: responseText });
     
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("AI Chat Error:", error);
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    const errorMessage = error instanceof Error ? error.message : "Internal Server Error";
+    return NextResponse.json({ error: errorMessage }, { status: 500 });
   }
 }

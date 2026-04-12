@@ -3,38 +3,16 @@
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MapIcon, Receipt, Route, LayoutDashboard, LogOut, User } from "lucide-react";
+import { MapIcon, Receipt, Route, LayoutDashboard, LogOut, User, Bell, Camera } from "lucide-react";
+import { motion } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
-
-const translations = {
-  vi: {
-    dashboard: "Bảng điều khiển",
-    itinerary: "Lịch trình",
-    splitBill: "Chia tiền",
-    admin: "Quản trị",
-    user: "Người dùng",
-    logout: "Đăng xuất",
-    signIn: "Đăng nhập",
-    getStarted: "Bắt đầu ngay"
-  },
-  en: {
-    dashboard: "Dashboard",
-    itinerary: "Itinerary",
-    splitBill: "Split-Bill",
-    admin: "Admin",
-    user: "User",
-    logout: "Logout",
-    signIn: "Sign In",
-    getStarted: "Get Started"
-  }
-};
 
 export function Navbar() {
   const { data: session, status } = useSession();
   const pathname = usePathname();
-  const { lang, setLang } = useLang();
+  const { lang, setLang, t } = useLang();
   
-  const t = translations[lang];
+  const navT = t.navbar;
 
   const isActive = (path: string) => pathname?.startsWith(path);
 
@@ -56,39 +34,58 @@ export function Navbar() {
           <div className="hidden md:flex flex-1 justify-center items-center space-x-1">
             {session && (
               <>
-                <Link
-                  href="/dashboard"
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive("/dashboard")
-                      ? "bg-white/10 text-white"
-                      : "text-gray-300 hover:text-white hover:bg-white/5"
-                  }`}
-                >
-                  <LayoutDashboard className="h-4 w-4" />
-                  {t.dashboard}
-                </Link>
-                <Link
-                  href="/itinerary"
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive("/itinerary")
-                      ? "bg-white/10 text-white"
-                      : "text-gray-300 hover:text-white hover:bg-white/5"
-                  }`}
-                >
-                  <Route className="h-4 w-4" />
-                  {t.itinerary}
-                </Link>
-                <Link
-                  href="/split-bill"
-                  className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-                    isActive("/split-bill")
-                      ? "bg-white/10 text-white"
-                      : "text-gray-300 hover:text-white hover:bg-white/5"
-                  }`}
-                >
-                  <Receipt className="h-4 w-4" />
-                  {t.splitBill}
-                </Link>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/dashboard"
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive("/dashboard")
+                        ? "bg-white/10 text-white"
+                        : "text-gray-300 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <LayoutDashboard className="h-4 w-4" />
+                    {navT.dashboard}
+                  </Link>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/itinerary"
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive("/itinerary")
+                        ? "bg-white/10 text-white"
+                        : "text-gray-300 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <Route className="h-4 w-4" />
+                    {navT.itinerary}
+                  </Link>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/journal"
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive("/journal")
+                        ? "bg-white/10 text-white"
+                        : "text-gray-300 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <Camera className="h-4 w-4" />
+                    {navT.journal}
+                  </Link>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/split-bill"
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive("/split-bill")
+                        ? "bg-white/10 text-white"
+                        : "text-gray-300 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <Receipt className="h-4 w-4" />
+                    {navT.splitBill}
+                  </Link>
+                </motion.div>
               </>
             )}
           </div>
@@ -99,7 +96,7 @@ export function Navbar() {
             <button 
               onClick={() => setLang(lang === "vi" ? "en" : "vi")}
               className="hidden sm:flex items-center justify-center h-8 px-2.5 rounded-md bg-white/5 border border-white/10 hover:bg-white/10 transition-colors"
-              title={lang === "vi" ? "Switch to English" : "Chuyển sang Tiếng Việt"}
+              title={navT.langTitle}
             >
               {lang === "vi" ? (
                 <div className="flex items-center gap-1.5">
@@ -122,6 +119,17 @@ export function Navbar() {
                 </div>
               )}
             </button>
+
+            {/* Notification Icon */}
+            <motion.div 
+              whileHover={{ scale: 1.1 }} 
+              whileTap={{ scale: 0.9 }}
+              className="relative cursor-pointer p-1.5 rounded-full hover:bg-white/5 transition-colors"
+            >
+              <Bell className="h-5 w-5 text-gray-300 hover:text-white" />
+              <span className="absolute top-1 right-1 h-2 w-2 bg-rose-500 rounded-full border-2 border-background animate-pulse shadow-rose-500/50 shadow-md"></span>
+            </motion.div>
+
             {status === "loading" ? (
               <div className="h-8 w-24 bg-white/10 animate-pulse rounded-md"></div>
             ) : session ? (
@@ -132,37 +140,41 @@ export function Navbar() {
                     className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 rounded-md text-sm font-medium transition-colors border border-rose-500/20"
                   >
                     <LayoutDashboard className="h-4 w-4" />
-                    {t.admin}
+                    {navT.admin}
                   </Link>
                 )}
                 <div className="hidden sm:flex items-center gap-2 text-sm text-gray-300 pl-2 border-l border-white/10">
                   <div className="h-8 w-8 rounded-full bg-indigo-900/50 flex items-center justify-center border border-indigo-500/30">
                     <User className="h-4 w-4 text-indigo-300" />
                   </div>
-                  <span className="font-medium truncate max-w-[100px]">{session.user?.name || t.user}</span>
+                  <span className="font-medium truncate max-w-[100px]">{session.user?.name || navT.user}</span>
                 </div>
                 <button
                   onClick={() => signOut({ callbackUrl: "/" })}
                   className="flex items-center gap-2 text-sm font-medium text-red-500 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-md transition-colors"
                 >
                   <LogOut className="h-4 w-4" />
-                  {t.logout}
+                  {navT.logout}
                 </button>
               </div>
             ) : (
               <div className="flex items-center gap-2">
-                <Link
-                  href="/login"
-                  className="text-sm font-medium text-gray-300 hover:text-white px-3 py-2 transition-colors"
-                >
-                  {t.signIn}
-                </Link>
-                <Link
-                  href="/register"
-                  className="text-sm font-medium bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-md transition-colors shadow-lg shadow-indigo-500/20"
-                >
-                  {t.getStarted}
-                </Link>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/login"
+                    className="text-sm font-medium text-gray-300 hover:text-white px-3 py-2 transition-colors"
+                  >
+                    {navT.signIn}
+                  </Link>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/register"
+                    className="text-sm font-medium bg-foreground text-background px-4 py-2 rounded-md transition-colors shadow-soft"
+                  >
+                    {navT.getStarted}
+                  </Link>
+                </motion.div>
               </div>
             )}
           </div>

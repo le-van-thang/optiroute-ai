@@ -9,48 +9,10 @@ import { useLang } from "@/components/providers/LangProvider";
 import { AuthBackground } from "@/components/ui/AuthBackground";
 import { useToast } from "@/components/providers/ToastProvider";
 
-const translations = {
-  vi: {
-    title: "Tạo tài khoản",
-    desc: "Nhập thông tin của bạn bên dưới để đăng ký tài khoản.",
-    namePlaceholder: "Họ và tên",
-    emailPlaceholder: "name@example.com",
-    pwdPlaceholder: "Tạo mật khẩu",
-    pwdConfirmPlaceholder: "Xác nhận mật khẩu",
-    submitBtn: "Tạo tài khoản",
-    processing: "Đang xử lý...",
-    haveAccount: "Đã có tài khoản?",
-    signIn: "Đăng nhập",
-    successMsg: "Đăng ký thành công! Đang chuyển trang...",
-    syncTitle: "Lịch trình thông minh",
-    syncDesc: "Tham gia cùng hàng ngàn du khách sử dụng hệ thống lên lộ trình và chia tiền thế hệ mới.",
-    syncSubtitle: "Thiết kế chuyến đi hoàn hảo với AI.",
-    errLength: "Mật khẩu phải có ít nhất 6 ký tự",
-    errMatch: "Mật khẩu xác nhận không khớp"
-  },
-  en: {
-    title: "Create an account",
-    desc: "Enter your details below to create your account.",
-    namePlaceholder: "Full Name",
-    emailPlaceholder: "name@example.com",
-    pwdPlaceholder: "Create a password",
-    pwdConfirmPlaceholder: "Confirm password",
-    submitBtn: "Create account",
-    processing: "Creating account...",
-    haveAccount: "Already have an account?",
-    signIn: "Sign in",
-    successMsg: "Registration successful! Redirecting...",
-    syncTitle: "Intelligent Planning",
-    syncDesc: "Join thousands of travelers using next-generation routing and expense tracking.",
-    syncSubtitle: "Design your perfect journey with AI.",
-    errLength: "Password must be at least 6 characters",
-    errMatch: "Passwords do not match"
-  }
-};
-
 export default function RegisterPage() {
   const router = useRouter();
-  const { lang } = useLang();
+  const { lang, t } = useLang();
+  const authT = t.auth;
   const [formData, setFormData] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState("");
@@ -59,7 +21,7 @@ export default function RegisterPage() {
   const [isSuccess, setIsSuccess] = useState(false);
   const { showToast } = useToast();
 
-  const t = translations[lang];
+
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -67,13 +29,13 @@ export default function RegisterPage() {
     setError("");
 
     if (formData.password.length < 6) {
-      showToast(t.errLength, "error");
+      showToast(authT.errLength, "error");
       setIsLoading(false);
       return;
     }
 
     if (formData.password !== formData.confirmPassword) {
-      showToast(t.errMatch, "error");
+      showToast(authT.errMatch, "error");
       setIsLoading(false);
       return;
     }
@@ -98,7 +60,7 @@ export default function RegisterPage() {
       }
 
       setIsSuccess(true);
-      showToast(t.successMsg, "success");
+      showToast(authT.successMsg, "success");
       setTimeout(() => {
         router.push("/login?registered=true");
       }, 1000);
@@ -138,13 +100,13 @@ export default function RegisterPage() {
         >
           <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-emerald-300 mb-8 backdrop-blur-sm shadow-xl shadow-emerald-900/20">
             <Compass className="h-4 w-4 text-emerald-400" />
-            {t.syncTitle}
+            {authT.syncTitle}
           </div>
           <h2 className="text-4xl md:text-5xl font-extrabold text-white tracking-tight mb-6 leading-tight">
-            {t.syncSubtitle}
+            {authT.syncSubtitle}
           </h2>
           <p className="text-lg text-cyan-100/70 leading-relaxed">
-            {t.syncDesc}
+            {authT.syncDesc}
           </p>
         </motion.div>
       </motion.div>
@@ -158,8 +120,8 @@ export default function RegisterPage() {
           className="w-full max-w-[360px] mx-auto space-y-4 relative z-10 py-8"
         >
           <div className="text-left mb-6">
-            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">{t.title}</h1>
-            <p className="text-gray-400 text-sm">{t.desc}</p>
+            <h1 className="text-3xl font-bold text-white mb-2 tracking-tight">{authT.title}</h1>
+            <p className="text-gray-400 text-sm">{authT.desc}</p>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
@@ -176,7 +138,7 @@ export default function RegisterPage() {
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
                   className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={t.namePlaceholder}
+                  placeholder={authT.namePlaceholder}
                 />
               </div>
 
@@ -190,7 +152,7 @@ export default function RegisterPage() {
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
                   className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={t.emailPlaceholder}
+                  placeholder={authT.emailPlaceholder}
                 />
               </div>
 
@@ -204,7 +166,7 @@ export default function RegisterPage() {
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                   className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={t.pwdPlaceholder}
+                  placeholder={authT.pwdPlaceholder}
                 />
                 <button
                   type="button"
@@ -225,7 +187,7 @@ export default function RegisterPage() {
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
                   className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={t.pwdConfirmPlaceholder}
+                  placeholder={authT.pwdConfirmPlaceholder}
                 />
               </div>
             </div>
@@ -240,11 +202,11 @@ export default function RegisterPage() {
               {(isLoading || isSuccess) ? (
                 <>
                   <Loader2 className="animate-spin h-5 w-5 text-white mr-2" />
-                  {t.processing}
+                  {authT.processing}
                 </>
               ) : (
                 <>
-                  {t.submitBtn}
+                  {authT.submitBtn}
                   <MoveRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
                 </>
               )}
@@ -252,9 +214,9 @@ export default function RegisterPage() {
           </form>
 
           <p className="mt-4 text-center text-sm text-gray-400">
-            {t.haveAccount}{" "}
+            {authT.haveAccount}{" "}
             <Link href="/login" className="font-semibold text-cyan-400 hover:text-cyan-300 transition-colors">
-              {t.signIn}
+              {authT.signIn}
             </Link>
           </p>
         </motion.div>
