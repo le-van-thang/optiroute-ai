@@ -2,18 +2,15 @@
 
 import Link from "next/link";
 import { motion, useScroll, useTransform } from "framer-motion";
-import { Map, Zap, Receipt, Compass, ChevronDown, MoveRight, Globe, Sparkles, Search } from "lucide-react";
-import { useRef, useState } from "react";
+import { Map, Zap, Receipt, Compass, ChevronDown, MoveRight, Globe, Sparkles } from "lucide-react";
+import { useRef } from "react";
 import { useLang } from "@/components/providers/LangProvider";
 import { useRouter } from "next/navigation";
-import { SearchPromptChips } from "@/components/itinerary/SearchPromptChips";
 
 export default function Home() {
   const { lang, t } = useLang();
   const homeT = t.home;
   const containerRef = useRef(null);
-  const router = useRouter();
-  const [prompt, setPrompt] = useState("");
 
   const { scrollYProgress } = useScroll({
     target: containerRef,
@@ -68,47 +65,10 @@ export default function Home() {
             {homeT.subtitle}
           </motion.p>
 
-          <motion.div
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.3 }}
-            className="w-full max-w-2xl px-4"
-          >
-            <div className="relative group mb-6">
-              <input
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    if (prompt.trim()) router.push(`/itinerary?q=${encodeURIComponent(prompt)}`);
-                  }
-                }}
-                placeholder={lang === "vi" ? "Bạn muốn đi đâu hôm nay? (VD: Nha Trang 3 ngày)" : "Where do you want to go? (e.g. 3 days in Hawaii)"}
-                className="w-full pl-6 pr-16 py-4 bg-slate-900/50 border border-white/10 rounded-2xl text-lg placeholder:text-slate-500 focus:bg-slate-900/80 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 transition-all shadow-inner text-white"
-              />
-              <button
-                disabled={!prompt.trim()}
-                onClick={() => {
-                  if (prompt.trim()) router.push(`/itinerary?q=${encodeURIComponent(prompt)}`);
-                }}
-                className="absolute right-2 top-1/2 -translate-y-1/2 p-2.5 bg-indigo-600 text-white rounded-xl shadow-lg disabled:opacity-30 disabled:scale-100 transition-all flex items-center justify-center hover:bg-indigo-500"
-              >
-                <Search className="w-5 h-5" strokeWidth={2} />
-              </button>
-            </div>
-            
-            <div className="flex justify-center mb-10">
-              <SearchPromptChips 
-                onSelect={(text) => router.push(`/itinerary?q=${encodeURIComponent(text)}`)} 
-              />
-            </div>
-          </motion.div>
-          
           <motion.div 
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.6, delay: 0.4 }}
+            transition={{ duration: 0.6, delay: 0.3 }}
             className="flex flex-col sm:flex-row gap-5 items-center justify-center font-bold"
           >
             <motion.div whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.95 }}>

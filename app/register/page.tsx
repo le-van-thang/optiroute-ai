@@ -124,7 +124,7 @@ export default function RegisterPage() {
             <p className="text-gray-400 text-sm">{authT.desc}</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
+          <form onSubmit={handleSubmit} autoComplete="off" className="space-y-4 flex flex-col">
             {/* Local alerts removed in favor of global Toasts */}
 
             <div className="space-y-3">
@@ -137,6 +137,7 @@ export default function RegisterPage() {
                   required
                   value={formData.name}
                   onChange={(e) => setFormData({ ...formData, name: e.target.value })}
+                  autoComplete="name"
                   className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
                   placeholder={authT.namePlaceholder}
                 />
@@ -151,6 +152,7 @@ export default function RegisterPage() {
                   required
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
+                  autoComplete="email"
                   className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
                   placeholder={authT.emailPlaceholder}
                 />
@@ -165,6 +167,7 @@ export default function RegisterPage() {
                   required
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                  autoComplete="new-password"
                   className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
                   placeholder={authT.pwdPlaceholder}
                 />
@@ -186,6 +189,7 @@ export default function RegisterPage() {
                   required
                   value={formData.confirmPassword}
                   onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                  autoComplete="new-password"
                   className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
                   placeholder={authT.pwdConfirmPlaceholder}
                 />

@@ -32,7 +32,15 @@ export default function LoginPage() {
     if (searchParams?.get("error")) {
       setError(authT.invalidMsg);
     }
-  }, [searchParams, lang]);
+
+    // Pro-fix: Manually clear password on mount to defeat aggressive Chrome autofill
+    // but keep it in a way that the browser still linked the fields for its dropdown.
+    const timers = [
+      setTimeout(() => setFormData(prev => ({ ...prev, password: "" })), 100),
+      setTimeout(() => setFormData(prev => ({ ...prev, password: "" })), 500)
+    ];
+    return () => timers.forEach(clearTimeout);
+  }, [searchParams, lang, authT.regSuccess, authT.invalidMsg]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -88,9 +96,13 @@ export default function LoginPage() {
             <p className="text-gray-400 text-sm">{authT.welcomeDesc}</p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4 flex flex-col">
-            {/* Local alerts removed in favor of global Toasts */}
-
+          <form onSubmit={handleSubmit} autoComplete="on" className="space-y-4 flex flex-col pt-2">
+            {/* Visually hidden inputs to 'catch' Chrome's initial aggressive autofill on page load */}
+            <div style={{ position: 'absolute', opacity: 0, height: 0, width: 0, overflow: 'hidden', zIndex: -1 }}>
+              <input type="text" name="email" tabIndex={-1} />
+              <input type="password" name="password" tabIndex={-1} />
+            </div>
+            
             <div className="space-y-3">
               <div className="relative group">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
@@ -99,6 +111,8 @@ export default function LoginPage() {
                 <input
                   type="email"
                   required
+                  name="email"
+                  id="email"
                   autoComplete="username"
                   value={formData.email}
                   onChange={(e) => setFormData({ ...formData, email: e.target.value })}
@@ -114,6 +128,8 @@ export default function LoginPage() {
                 <input
                   type={showPassword ? "text" : "password"}
                   required
+                  name="password"
+                  id="password"
                   autoComplete="current-password"
                   value={formData.password}
                   onChange={(e) => setFormData({ ...formData, password: e.target.value })}
