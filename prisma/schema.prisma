@@ -7,58 +7,111 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+// ─── Enums ───────────────────────────────────────────────
 enum Role {
   USER
   ADMIN
 }
 
+enum GroupMemberRole {
+  LEADER
+  MEMBER
+}
+
+// ─── Models ──────────────────────────────────────────────
 model User {
-  id            String         @id @default(uuid())
-  email         String         @unique
-  passwordHash  String
-  name          String?
-  role          Role           @default(USER)
-  travelDNA     Json?
-  
-  trips         Trip[]
-  expensesPaid  Expense[]      @relation("PayerExpenses")
-  expenseShares ExpenseShare[]
+  id                String         @id @default(uuid())
+  email             String         @unique
+  passwordHash      String
+  name              String?
+  role              Role           @default(USER)
+  travelDNA         Json?
+  // Phase 21: Bank info for secure QR generation
+  bankName          String?
+  bankCode          String?
+  bankAccountNumber String?
+  bankAccountName   String?
+
+  trips              Trip[]
+  groupMembers       GroupMember[]
+  expensesPaid       Expense[]      @relation("PayerExpenses")
+  expenseShares      ExpenseShare[]
+  notifications      Notification[]
+  journalEntries     JournalEntry[]
+  payerSettlements   Settlement[]   @relation("PayerSettlements")
+  receiverSettlements Settlement[]  @relation("ReceiverSettlements")
+
+  // Phase 23: Persistence for split-bill active group
+  lastActiveTripId  String?
 }
 
 model Place {
-  id             String     @id @default(uuid())
-  name           String
-  lat            Float
-  lng            Float
-  category       String     // STAY, EAT, PLAY
-  estimatedCost  Float?
+  id              String     @id @default(uuid())
+  name            String
+  lat             Float
+  lng             Float
+  category        String     // STAY, EAT, PLAY
+  estimatedCost   Float?
   durationMinutes Int?
-  
-  tripItems      TripItem[]
+
+  tripItems       TripItem[]
 }
 
 model Trip {
-  id        String     @id @default(uuid())
-  userId    String
-  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
-  title     String
-  createdAt DateTime   @default(now())
-  budget    Float?
-  startDate DateTime?
-  endDate   DateTime?
-  city      String?
-  
-  tripItems TripItem[]
-  expenses  Expense[]
+  id           String        @id @default(uuid())
+  userId       String
+  user         User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title        String
+  createdAt    DateTime      @default(now())
+  budget       Float?
+  startDate    DateTime?
+  endDate      DateTime?
+  city         String?
+  // Phase 21: Invite system
+  inviteCode   String?       @unique
+
+  tripItems    TripItem[]
+  expenses     Expense[]
+  groupMembers GroupMember[]
+  journalEntries JournalEntry[]
+  settlements  Settlement[]
+}
+
+model Settlement {
+  id          String   @id @default(uuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  payerId     String
+  payer       User     @relation("PayerSettlements", fields: [payerId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User     @relation("ReceiverSettlements", fields: [receiverId], references: [id], onDelete: Cascade)
+  amount      Float
+  receiptUrl  String?
+  status      String   @default("PENDING") // PENDING, COMPLETED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+// Phase 21: Many-to-many pivot for Trip members
+model GroupMember {
+  id       String          @id @default(uuid())
+  tripId   String
+  trip     Trip            @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId   String
+  user     User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  role     GroupMemberRole @default(MEMBER)
+  joinedAt DateTime        @default(now())
+
+  @@unique([tripId, userId])
 }
 
 model TripItem {
-  id         String   @id @default(uuid())
+  id         String    @id @default(uuid())
   tripId     String
-  trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  trip       Trip      @relation(fields: [tripId], references: [id], onDelete: Cascade)
   placeId    String
-  place      Place    @relation(fields: [placeId], references: [id], onDelete: Cascade)
-  createdAt  DateTime @default(now())
+  place      Place     @relation(fields: [placeId], references: [id], onDelete: Cascade)
+  createdAt  DateTime  @default(now())
   date       DateTime?
   orderIndex Int
 }
@@ -72,15 +125,42 @@ model Expense {
   totalAmount Float
   payerId     String
   payer       User           @relation("PayerExpenses", fields: [payerId], references: [id], onDelete: Cascade)
-  
+
   shares      ExpenseShare[]
 }
 
 model ExpenseShare {
-  id          String  @id @default(uuid())
-  expenseId   String
-  expense     Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  id             String  @id @default(uuid())
+  expenseId      String
+  expense        Expense @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+  userId         String
+  user           User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  amountOwed     Float
+  // Phase 21: Track settlement confirmation
+  settlementPaid Boolean @default(false)
+}
+
+// Tier 3: In-app notifications
+model Notification {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  message   String
+  isRead    Boolean  @default(false)
+  link      String?  // Optional deeplink e.g. /split-bill?tripId=xxx
+  createdAt DateTime @default(now())
+}
+
+// Tier 4: Geo-Journal entries with Cloudinary image
+model JournalEntry {
+  id          String   @id @default(uuid())
+  tripId      String
+  trip        Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
   userId      String
-  user        User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  amountOwed  Float
+  user        User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  lat         Float
+  lng         Float
+  textContent String?
+  imageUrl    String   // Cloudinary secure_url
+  createdAt   DateTime @default(now())
 }
