@@ -25,7 +25,7 @@ export async function POST(req: Request) {
     }
 
     // Validate at least one key exists
-    const hasAnyKey = [1,2,3,4,5].some(i => {
+    const hasAnyKey = Array.from({length: 20}, (_, i) => i + 1).some(i => {
       const k = process.env[`GEMINI_API_KEY_${i}`];
       return k && k.trim() !== "" && k !== "your-gemini-api-key-here";
     });

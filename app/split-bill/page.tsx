@@ -1,23 +1,48 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo, useEffect, useCallback, Suspense } from "react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { useSession } from "next-auth/react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
 import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } from 'recharts';
 import {
-  Users, Plus, Receipt, ArrowRightLeft, X, Trash2,
+  Users, Plus, Receipt, ArrowRightLeft, X, Trash2, Check,
   QrCode, ChevronDown, CheckCheck, UserPlus, Wallet,
   CreditCard, Banknote, Info, User, ArrowUpRight, ArrowDownRight,
-  TrendingUp, Activity, Split, Download, Share2, Maximize2, Search, CheckCircle2
+  TrendingUp, Activity, Split, Download, Share2, Maximize2, Search, CheckCircle2,
+  Link2, Copy, Loader2, Eye, ShieldCheck, AlertCircle, Image as ImageIcon,
+  BellRing, Mail
 } from "lucide-react";
+import { CldUploadWidget } from "next-cloudinary";
+import { BankSettingsModal } from "@/components/split-bill/BankSettingsModal";
+import { PaymentModal } from "@/components/split-bill/PaymentModal";
+import { BankBanner } from "@/components/split-bill/BankBanner";
+import { useToast } from "@/components/providers/ToastProvider";
 
 // --- Types ---
 interface Member {
   id: string;
   name: string;
   color: string;
-  bankCode?: string;
-  bankAccount?: string;
+  email?: string; // Phase 21: store email for identifying current user
+  // DB fields (when in multiplayer mode)
+  dbUserId?: string;
+  bankCode?: string;    // local-only (singleplayer)
+  bankAccount?: string; // local-only (singleplayer)
+  bankAccountName?: string; 
+  hasBankInDb?: boolean; // true = bank info exists in DB
+  isLeader?: boolean;   // true = trip leader
+  isMe?: boolean;
+}
+interface DB_Settlement {
+  id: string;
+  payerId: string;
+  receiverId: string;
+  amount: number;
+  status: "PENDING" | "COMPLETED";
+  receiptUrl?: string;
+  createdAt: string;
 }
 interface Expense {
   id: string;
@@ -25,8 +50,17 @@ interface Expense {
   amount: number;
   paidBy: string; // member id
   participants: string[]; // member ids
+  createdAt?: string;    // ISO date string
+  synced?: boolean;
 }
 interface Settlement { from: string; to: string; amount: number; }
+interface TripInfo { 
+  id: string; 
+  title: string; 
+  city: string | null; 
+  inviteCode: string | null; 
+  ownerId?: string; // Phase 21: track owner for UI
+}
 
 // --- VietQR Banks ---
 const BANKS = [
@@ -110,356 +144,59 @@ function calculateSettlements(members: Member[], expenses: Expense[]): Settlemen
   return settlements;
 }
 
+// Phase 23: Balance with DB Settlements - Refactored for overpayment accuracy
+function calculateNetSettlements(members: Member[], expenses: Expense[], dbSettlements: DB_Settlement[]): Settlement[] {
+  const balance: Record<string, number> = {};
+  members.forEach(m => balance[m.id] = 0);
+
+  // 1. Calculate base balances from expenses
+  expenses.forEach(exp => {
+    if (!balance.hasOwnProperty(exp.paidBy)) return;
+    const share = exp.amount / (exp.participants.length || 1);
+    exp.participants.forEach(pid => {
+      if (balance.hasOwnProperty(pid)) balance[pid] -= share;
+    });
+    balance[exp.paidBy] += exp.amount;
+  });
+
+  // 2. Adjust balances with COMPLETED settlements (the "Reality" check)
+  dbSettlements.forEach(s => {
+    if (s.status === "COMPLETED") {
+      if (balance.hasOwnProperty(s.payerId)) balance[s.payerId] += s.amount;
+      if (balance.hasOwnProperty(s.receiverId)) balance[s.receiverId] -= s.amount;
+    }
+  });
+
+  // 3. Solve for minimum transactions using Net Balances
+  const creditors: { id: string; amount: number }[] = [];
+  const debtors: { id: string; amount: number }[] = [];
+
+  Object.entries(balance).forEach(([id, amt]) => {
+    if (amt > 0.01) creditors.push({ id, amount: amt });
+    else if (amt < -0.01) debtors.push({ id, amount: -amt });
+  });
+
+  const settlements: Settlement[] = [];
+  let ci = 0, di = 0;
+  while (ci < creditors.length && di < debtors.length) {
+    const credit = creditors[ci];
+    const debt = debtors[di];
+    const amount = Math.min(credit.amount, debt.amount);
+    settlements.push({ from: debt.id, to: credit.id, amount: Math.round(amount) });
+    credit.amount -= amount;
+    debt.amount -= amount;
+    if (credit.amount < 0.01) ci++;
+    if (debt.amount < 0.01) di++;
+  }
+  return settlements;
+}
+
 // --- Animated Counter ---
 function AnimatedNumber({ value }: { value: number }) {
   return <span className="tabular-nums">{value.toLocaleString()}</span>;
 }
 
-// --- VietQR Modal ---
-function VietQRModal({
-  settlement, members, onClose, onSaveBank, onConfirmSettle
-}: {
-  settlement: Settlement;
-  members: Member[];
-  onClose: () => void;
-  onSaveBank: (memberId: string, bankCode: string, bankAccount: string) => void;
-  onConfirmSettle: (s: Settlement) => void;
-}) {
-  const toMemberObj = members.find(m => m.id === settlement.to);
-  const fromMemberObj = members.find(m => m.id === settlement.from);
-  
-  const [bank, setBank] = useState("MB");
-  const [account, setAccount] = useState("");
-  const [showQR, setShowQR] = useState(false);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [showBankDropdown, setShowBankDropdown] = useState(false);
-  const [searchBankQuery, setSearchBankQuery] = useState("");
-  const [saveDefault, setSaveDefault] = useState(true);
-  const [imgError, setImgError] = useState(false);
-  const [successAnim, setSuccessAnim] = useState(false);
-
-  useEffect(() => setImgError(false), [bank, account]);
-
-  const filteredBanks = useMemo(() => {
-    if (!searchBankQuery) return BANKS;
-    return BANKS.filter(b => b.name.toLowerCase().includes(searchBankQuery.toLowerCase()) || b.code.toLowerCase().includes(searchBankQuery.toLowerCase()));
-  }, [searchBankQuery]);
-
-  const fromMemberName = fromMemberObj?.name || "?";
-  const toMemberName = toMemberObj?.name || "?";
-  const amount = settlement.amount;
-  const addInfo = encodeURIComponent(`Chuyen tien du lich cho ${toMemberName}`);
-  
-  const activeBankRaw = toMemberObj?.bankCode || bank;
-  const activeBank = activeBankRaw === "LPB" ? "970449" : activeBankRaw; // Fix for VietQR LPBank shortname routing
-  const activeAccount = toMemberObj?.bankAccount || account;
-  const qrUrl = `https://img.vietqr.io/image/${activeBank}-${activeAccount}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${encodeURIComponent(toMemberName)}`;
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <motion.div
-        initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-        onClick={onClose}
-        className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-      />
-      <motion.div
-        initial={{ opacity: 0, scale: 0.95, y: 10 }}
-        animate={{ opacity: 1, scale: 1, y: 0 }}
-        exit={{ opacity: 0, scale: 0.95, y: 10 }}
-        className="relative w-full max-w-sm bg-slate-900 border border-white/10 rounded-[24px] shadow-2xl overflow-hidden"
-      >
-        {successAnim ? (
-           <div className="flex flex-col items-center justify-center text-center py-20 px-8">
-              <motion.div
-                 initial={{ scale: 0, opacity: 0, rotate: -180 }}
-                 animate={{ scale: 1, opacity: 1, rotate: 0 }}
-                 transition={{ type: "spring", stiffness: 200, damping: 15 }}
-                 className="w-24 h-24 bg-emerald-500/10 rounded-full flex items-center justify-center mb-6 ring-8 ring-emerald-500/20"
-              >
-                 <CheckCircle2 className="w-12 h-12 text-emerald-400" />
-              </motion.div>
-              <motion.h3 initial={{y: 10, opacity: 0}} animate={{y: 0, opacity: 1}} transition={{delay: 0.2}} className="text-2xl font-black text-white mb-2 tracking-tight">Thanh toán hoàn tất!</motion.h3>
-              <motion.p initial={{y: 10, opacity: 0}} animate={{y: 0, opacity: 1}} transition={{delay: 0.3}} className="text-slate-400 text-sm font-medium">Hệ thống đang tự động cấn trừ công nợ.</motion.p>
-           </div>
-        ) : (
-          <>
-            <div className="py-4 px-5 border-b border-white/10 flex justify-between items-center bg-slate-950/60">
-              <div className="flex items-center gap-2">
-                <div className="w-7 h-7 rounded-full bg-indigo-500/20 flex items-center justify-center">
-                  <QrCode className="w-3.5 h-3.5 text-indigo-400" strokeWidth={2} />
-                </div>
-                <h3 className="text-sm font-bold text-white tracking-wide">Thanh toán VietQR</h3>
-              </div>
-              <button onClick={onClose} className="text-slate-500 hover:text-white transition-colors bg-white/5 hover:bg-white/10 p-1.5 rounded-full">
-                <X className="w-4 h-4" strokeWidth={2} />
-              </button>
-            </div>
-
-            <div className="p-4 space-y-3.5">
-              <div className="flex items-center justify-between bg-[#0a1128] border border-indigo-500/10 rounded-xl p-2.5">
-                <div>
-                  <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-0.5">Người chuyển</p>
-                  <p className="text-sm font-bold text-white">{fromMemberName}</p>
-                </div>
-            <ArrowRightLeft className="w-4 h-4 text-indigo-400/50 flex-shrink-0 mx-2" strokeWidth={2} />
-            <div className="text-right">
-              <p className="text-[9px] text-slate-500 font-bold uppercase tracking-wider mb-0.5">Người nhận</p>
-              <p className="text-sm font-bold text-white">{toMemberName}</p>
-            </div>
-          </div>
-
-          <div className="text-center py-1">
-            <p className="text-3xl font-black text-indigo-400 tabular-nums tracking-tight">
-              {amount.toLocaleString()}
-            </p>
-            <p className="text-[10px] text-slate-500 font-bold mt-0.5 tracking-widest uppercase">VND</p>
-          </div>
-
-          {toMemberObj?.bankAccount ? (
-            <div className="bg-[#0a1128] border border-emerald-500/20 rounded-2xl p-4 relative overflow-hidden group">
-               <div className="absolute top-0 right-0 p-3">
-                 <button onClick={() => {
-                   onSaveBank(settlement.to, "", ""); // Reset to allow editing
-                 }} className="text-[9px] font-bold uppercase tracking-widest bg-white/5 border border-white/10 text-slate-400 hover:text-white hover:bg-rose-500/20 px-2 py-1.5 rounded-lg hidden group-hover:block transition-all">Sửa tài khoản</button>
-               </div>
-               <div className="flex items-center gap-3 mb-2.5">
-                 <div className="w-8 h-8 bg-emerald-500/10 rounded-full flex items-center justify-center">
-                    <CheckCheck className="w-4 h-4 text-emerald-400" />
-                 </div>
-                 <p className="text-xs text-emerald-400 font-bold uppercase tracking-wider">Tài khoản chính thức</p>
-               </div>
-               <p className="text-xl font-black text-white px-1 tracking-tight">{toMemberObj.bankAccount}</p>
-               <p className="text-sm font-medium text-slate-400 px-1 mt-0.5">{BANKS.find(b=>b.code === toMemberObj.bankCode)?.name}</p>
-            </div>
-          ) : (
-            <div className="space-y-3.5">
-              <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-[11px] text-amber-200/90 font-medium leading-relaxed">
-                 <Info className="w-4 h-4 text-amber-400 inline-block mr-1.5 -mt-0.5" />
-                 <strong>{toMemberName}</strong> chưa có tài khoản. Hãy kiểm tra và nhập cẩn thận để tránh chuyển nhầm nhé.
-              </div>
-              <div className="space-y-2.5">
-                <div className="relative">
-                  <button
-                    onClick={() => setShowBankDropdown(!showBankDropdown)}
-                    className="w-full flex items-center justify-between pl-10 pr-3.5 py-2.5 bg-[#0a1128] border border-white/5 hover:border-indigo-500/40 rounded-xl transition-all h-[42px]"
-                  >
-                    <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                      <Banknote className="w-4 h-4 text-indigo-400/50" />
-                    </div>
-                    <span className="text-white text-sm font-medium">
-                      {BANKS.find(b => b.code === bank)?.name} <span className="text-slate-400 text-xs ml-1 font-normal">({bank})</span>
-                    </span>
-                    <ChevronDown className={`w-3.5 h-3.5 text-slate-500 transition-transform ${showBankDropdown ? "rotate-180" : ""}`} />
-                  </button>
-
-                  <AnimatePresence>
-                    {showBankDropdown && (
-                      <motion.div
-                        initial={{ opacity: 0, y: -5, scale: 0.98 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: -5, scale: 0.98 }} transition={{ duration: 0.15 }}
-                        className="absolute z-50 w-full mt-2 bg-[#0a1128] border border-white/10 rounded-xl shadow-[0_10px_40px_-10px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col max-h-[280px]"
-                      >
-                        <div className="p-2 border-b border-white/5 sticky top-0 bg-[#0a1128]/95 backdrop-blur-md z-10">
-                           <div className="relative">
-                             <div className="absolute inset-y-0 left-0 pl-2.5 flex items-center pointer-events-none">
-                                <Search className="w-3.5 h-3.5 text-slate-500" />
-                             </div>
-                             <input 
-                               autoFocus
-                               className="w-full pl-8 pr-3 py-1.5 bg-slate-900 border border-white/5 rounded-lg text-sm text-white placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/50 transition-all font-medium"
-                               placeholder="Tìm tên hoặc mã ngân hàng..."
-                               value={searchBankQuery}
-                               onChange={e => setSearchBankQuery(e.target.value)}
-                             />
-                           </div>
-                        </div>
-                        <div className="overflow-y-auto custom-scrollbar p-1 z-0">
-                          {filteredBanks.length === 0 ? (
-                            <p className="text-xs text-slate-500 text-center py-4">Không tìm thấy ngân hàng</p>
-                          ) : (
-                            filteredBanks.map(b => (
-                              <button
-                                key={b.code}
-                                onClick={() => { setBank(b.code); setShowBankDropdown(false); setShowQR(false); setSearchBankQuery(''); }}
-                                className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-all flex items-center justify-between ${b.code === bank ? "bg-indigo-600/20 text-indigo-300" : "text-white hover:bg-slate-800"}`}
-                              >
-                                <span>{b.name}</span>
-                                <span className="text-[10px] bg-white/5 px-1.5 py-0.5 rounded text-slate-400 font-bold">{b.code}</span>
-                              </button>
-                            ))
-                          )}
-                        </div>
-                      </motion.div>
-                    )}
-                  </AnimatePresence>
-                </div>
-
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none">
-                    <CreditCard className="w-4 h-4 text-indigo-400/50" />
-                  </div>
-                  <input
-                    value={account}
-                    onChange={e => { setAccount(e.target.value); setShowQR(false); }}
-                    placeholder={`Số tài khoản của ${toMemberName}`}
-                    className="w-full pl-10 pr-4 py-2.5 bg-[#0a1128] border border-white/5 rounded-xl text-white text-sm placeholder:text-slate-600 focus:outline-none focus:border-indigo-500/40 focus:ring-2 focus:ring-indigo-500/10 transition-all font-medium"
-                  />
-                </div>
-              </div>
-
-              <label className="flex items-center gap-2.5 px-1 py-1 cursor-pointer group mt-1.5 w-fit">
-                 <input type="checkbox" checked={saveDefault} onChange={e => setSaveDefault(e.target.checked)} className="w-4 h-4 rounded border-indigo-500/30 bg-slate-900/50 text-indigo-600 focus:ring-offset-0 focus:ring-0 transition-all cursor-pointer" />
-                 <span className="text-xs text-slate-400 group-hover:text-slate-300 transition-colors select-none">
-                    Lưu làm tài khoản mặc định cho <strong className="text-indigo-300">{toMemberName}</strong>
-                 </span>
-              </label>
-            </div>
-          )}
-
-          {!showQR && (
-            <motion.button
-              whileHover={{ scale: 1.02 }} whileTap={{ scale: 0.98 }}
-              disabled={!toMemberObj?.bankAccount && !account.trim()}
-              onClick={() => {
-                if (!toMemberObj?.bankAccount && saveDefault && settlement.to) {
-                  onSaveBank(settlement.to, bank, account);
-                }
-                setShowQR(true);
-              }}
-              className="w-full py-3 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-indigo-600/20 disabled:opacity-50 disabled:shadow-none transition-all flex items-center justify-center gap-2 mt-4"
-            >
-              <QrCode className="w-5 h-5" strokeWidth={2} />
-              <span>{toMemberObj?.bankAccount ? "Mở mã QR An toàn" : "Tiếp tục tạo mã"}</span>
-            </motion.button>
-          )}
-
-          <AnimatePresence>
-            {showQR && activeAccount && (
-              <motion.div
-                initial={{ opacity: 0, height: 0 }}
-                animate={{ opacity: 1, height: "auto" }}
-                exit={{ opacity: 0, height: 0 }}
-                className="overflow-hidden"
-              >
-                <div className="pt-2 flex flex-col items-center">
-                  <div 
-                    onClick={() => !imgError && setIsFullscreen(true)}
-                    className={`relative bg-white rounded-2xl p-2.5 shadow-2xl ring-4 ring-indigo-500/20 mt-2 mb-4 transition-transform ${!imgError ? "cursor-pointer group hover:scale-105" : ""}`}
-                  >
-                    {!imgError ? (
-                      <img src={qrUrl} alt="VietQR" className="w-[140px] h-[140px] object-contain block" onError={() => setImgError(true)} />
-                    ) : (
-                      <div className="w-[140px] h-[140px] flex flex-col items-center justify-center text-center p-2">
-                         <Info className="w-6 h-6 text-amber-500 mb-1.5" />
-                         <p className="text-[10px] text-slate-500 font-bold leading-tight">Mã QR bị từ chối do sai định dạng STK của ngân hàng.</p>
-                      </div>
-                    )}
-                    {!imgError && (
-                      <div className="absolute inset-0 bg-indigo-900/40 opacity-0 group-hover:opacity-100 transition-opacity rounded-2xl flex items-center justify-center backdrop-blur-[2px]">
-                         <Maximize2 className="w-8 h-8 text-white drop-shadow-md" strokeWidth={2.5} />
-                      </div>
-                    )}
-                  </div>
-
-                  {imgError ? (
-                    <div className="flex w-full gap-3">
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(activeAccount); }}
-                        className="flex-1 py-2.5 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/20 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-colors"
-                      >
-                        <CreditCard className="w-3.5 h-3.5" />
-                        Copy STK
-                      </button>
-                      <button 
-                        onClick={(e) => { e.stopPropagation(); navigator.clipboard.writeText(amount.toString()); }}
-                        className="flex-1 py-2.5 bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-colors"
-                      >
-                        <Banknote className="w-3.5 h-3.5" />
-                        Copy Số tiền
-                      </button>
-                    </div>
-                  ) : (
-                    <div className="flex w-full gap-3">
-                      <a 
-                        href={qrUrl} download={`qr_${toMemberName}.png`}
-                        className="flex-1 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-colors"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        Tải Mã
-                      </a>
-                      <button 
-                        onClick={() => {
-                          if (navigator.share) {
-                            navigator.share({ title: `Thanh toán cho ${toMemberName}`, url: qrUrl });
-                          }
-                        }}
-                        className="flex-1 py-2.5 bg-slate-800/80 hover:bg-slate-700 text-slate-300 hover:text-white border border-white/5 rounded-xl flex items-center justify-center gap-2 text-xs font-bold transition-colors"
-                      >
-                        <Share2 className="w-3.5 h-3.5" />
-                        Chia sẻ
-                      </button>
-                    </div>
-                  )}
-
-                  <div className="mt-4 pt-4 border-t border-white/5 w-full">
-                    <button
-                       onClick={() => {
-                         setSuccessAnim(true);
-                         setTimeout(() => {
-                           onConfirmSettle(settlement);
-                           onClose();
-                         }, 2300);
-                       }}
-                       className="w-full py-3.5 bg-[#0a1128] hover:bg-emerald-500/10 text-slate-300 hover:text-emerald-400 border border-white/5 hover:border-emerald-500/30 rounded-xl text-sm font-bold transition-all flex items-center justify-center gap-2 group"
-                    >
-                       <CheckCircle2 className="w-4 h-4 text-slate-500 group-hover:text-emerald-400 transition-colors" />
-                       Xác nhận đã chuyển khoản
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </>
-    )}
-  </motion.div>
-
-      <AnimatePresence>
-        {isFullscreen && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-[60] bg-slate-950/98 backdrop-blur-3xl flex items-center justify-center p-6"
-            onClick={() => setIsFullscreen(false)}
-          >
-            <button 
-              onClick={() => setIsFullscreen(false)} 
-              className="absolute top-6 right-6 p-3 bg-white/5 hover:bg-white/10 rounded-full text-slate-400 hover:text-white transition-all"
-            >
-              <X className="w-6 h-6" />
-            </button>
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.8, opacity: 0 }} transition={{ type: "spring", damping: 20 }}
-              className="bg-white p-6 rounded-[32px] shadow-[0_0_80px_rgba(99,102,241,0.4)]"
-              onClick={e => e.stopPropagation()}
-            >
-              <img src={qrUrl} alt="VietQR Zoom" className="w-[300px] h-[300px] sm:w-[400px] sm:h-[400px] object-contain" />
-              <div className="mt-8 pt-6 border-t border-slate-100 flex justify-between items-center px-2">
-                 <div>
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Người nhận</p>
-                    <p className="text-xl font-black text-slate-800">{toMemberName}</p>
-                 </div>
-                 <div className="text-right">
-                    <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Số tiền</p>
-                    <p className="text-xl font-black text-indigo-600 tabular-nums">{amount.toLocaleString()} ₫</p>
-                 </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-    </div>
-  );
-}
+// --- Modals & Helpers migrated to separate components ---
 
 // --- Helper functions ---
 const getStandardColor = (index: number) => {
@@ -467,20 +204,265 @@ const getStandardColor = (index: number) => {
   return colors[index % colors.length];
 };
 
-export default function SplitBillPage() {
+// --- Main Component logic moved to SplitBillContent for Suspense handle ---
+function SplitBillContent() {
   const { lang } = useLang();
+  const router = useRouter();
+  const { data: session } = useSession();
+  const searchParams = useSearchParams();
+  const { showToast } = useToast();
+  const tripIdFromUrl = searchParams.get("tripId");
   
   const [members, setMembers] = useState<Member[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
   const [activeTab, setActiveTab] = useState<"expenses" | "settle">("expenses");
+
+  // Auto-switch tab and scroll to settlement if param exists
+  useEffect(() => {
+    const tabParam = searchParams.get("tab");
+    if (tabParam === "settle") {
+      setActiveTab("settle");
+      // Give time for the tab to render before scrolling
+      setTimeout(() => {
+        const element = document.getElementById("settlement-section");
+        if (element) {
+          element.scrollIntoView({ behavior: "smooth", block: "start" });
+        }
+      }, 500);
+    }
+  }, [searchParams]);
+
   const [showExpForm, setShowExpForm] = useState(false);
   const [amountInput, setAmountInput] = useState("");
   const [memberInput, setMemberInput] = useState("");
-  const [expForm, setExpForm] = useState<Omit<Expense, "id">>({ name: "", amount: 0, paidBy: "", participants: [] });
+  const [expForm, setExpForm] = useState<Omit<Expense, "id">>(({ name: "", amount: 0, paidBy: "", participants: [] }));
   const [qrTarget, setQrTarget] = useState<Settlement | null>(null);
   const [isLoaded, setIsLoaded] = useState(false);
 
+  // Fintech Audit & UI Context
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [expenseToDelete, setExpenseToDelete] = useState<Expense | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [reminding, setReminding] = useState<string | null>(null); // from-to key
+  const [notReceiving, setNotReceiving] = useState<string | null>(null); // debtor-trip key
+  
+  // Multiplayer state
+  const [activeTrip, setActiveTrip] = useState<TripInfo | null>(null);
+  const [myTrips, setMyTrips] = useState<TripInfo[]>([]);
+  const [isMultiplayer, setIsMultiplayer] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
+  const [codeCopied, setCodeCopied] = useState(false);
+  const [loadingTrip, setLoadingTrip] = useState(false);
+  const [inviteCodeInput, setInviteCodeInput] = useState("");
+  const [joining, setJoining] = useState(false);
+  const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
+  const [initialSyncDone, setInitialSyncDone] = useState(false); // Persistence guard
+
+  // Banking & Smart Settlements
+  const [dbSettlements, setDbSettlements] = useState<DB_Settlement[]>([]);
+  const [showBankModal, setShowBankModal] = useState(false);
+  const [viewingSettlement, setViewingSettlement] = useState<{ receiver: Member; amount: number } | null>(null);
+  const [meBankMissing, setMeBankMissing] = useState(false);
+  const [reportSuccess, setReportSuccess] = useState<string | null>(null); // settlementId
+  const [viewingReceipt, setViewingReceipt] = useState<string | null>(null); // receiptUrl
+  const [recentlyCompletedIds, setRecentlyCompletedIds] = useState<string[]>([]); // For temporary history visibility
+
+  // ─── Load trips from DB ─────────────────────────────
   useEffect(() => {
+    if (!session?.user) return;
+    const fetchTripsAndProfile = async () => {
+      try {
+        // Fetch trips
+        const tripRes = await fetch("/api/trips");
+        const trips = await tripRes.json();
+        if (Array.isArray(trips)) setMyTrips(trips);
+
+        // Fetch profile for lastActiveTripId
+        const profileRes = await fetch("/api/user/profile");
+        const profile = await profileRes.json();
+
+        if (Array.isArray(trips)) {
+          // Persistence: Restore last active trip if not already set by URL
+          if (!tripIdFromUrl) {
+            const dbLastTripId = profile.lastActiveTripId;
+            const storageLastTripId = localStorage.getItem("optiroute_last_trip_id");
+            const targetId = dbLastTripId || storageLastTripId;
+
+            if (targetId) {
+              const found = trips.find(t => t.id === targetId);
+              if (found) handleSelectTrip(found, true);
+            }
+          }
+        }
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setInitialSyncDone(true);
+      }
+    };
+    fetchTripsAndProfile();
+  }, [session]);
+
+  // ─── Handle tripId from URL (after joining via invite) ─
+  useEffect(() => {
+    if (!tripIdFromUrl || myTrips.length === 0) return;
+    const found = myTrips.find(t => t.id === tripIdFromUrl);
+    if (found) handleSelectTrip(found);
+  }, [tripIdFromUrl, myTrips]);
+
+  // ─── Save active trip for persistence ───────────────
+  useEffect(() => {
+    if (activeTrip?.id) {
+      localStorage.setItem("optiroute_last_trip_id", activeTrip.id);
+    } else if (initialSyncDone && !isMultiplayer) {
+      // ONLY remove if we have finished checking the DB and are truly in personal mode
+      localStorage.removeItem("optiroute_last_trip_id");
+    }
+  }, [activeTrip, isMultiplayer, initialSyncDone]);
+
+  // ─── Load trip data from DB ──────────────────────────
+  const handleSelectTrip = useCallback(async (trip: TripInfo, isQuiet: boolean = false) => {
+    if (!isQuiet) {
+      setLoadingTrip(true);
+      // Clear previous trip data immediately to avoid "ghost" data
+      setMembers([]);
+      setExpenses([]);
+      setDbSettlements([]);
+    }
+    setActiveTrip(trip);
+    setIsMultiplayer(true);
+    
+    // Sync to URL
+    const params = new URLSearchParams(searchParams.toString());
+    params.set("tripId", trip.id);
+    router.replace(`/split-bill?${params.toString()}`);
+    
+    // Sync to DB profile
+    fetch("/api/user/profile", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ lastActiveTripId: trip.id })
+    }).catch(console.error);
+
+    try {
+      // Load members from DB
+      const membersRes = await fetch(`/api/trips/${trip.id}/members`);
+      const membersData = await membersRes.json();
+      if (Array.isArray(membersData)) {
+        const mapped: Member[] = membersData.map((gm: any, i: number) => {
+          const isMe = gm.user.email === session?.user?.email;
+          return {
+            id: gm.userId,
+            dbUserId: gm.userId,
+            name: gm.user.name || gm.user.email,
+            email: gm.user.email, 
+            color: MEMBER_COLORS[i % MEMBER_COLORS.length],
+            hasBankInDb: !!(gm.user.bankCode && gm.user.bankAccountNumber),
+            bankCode: gm.user.bankCode,
+            bankAccount: gm.user.bankAccountNumber,
+            bankAccountName: gm.user.bankAccountName,
+            isLeader: gm.role === "LEADER" || gm.userId === trip.ownerId,
+            isMe,
+          };
+        });
+        setMembers(mapped);
+        
+        // Contextual trigger: Check if 'me' has bank info
+        const me = mapped.find(m => m.isMe);
+        setMeBankMissing(!me?.hasBankInDb);
+      }
+
+      // Load settlements from DB
+      const settleRes = await fetch(`/api/trips/${trip.id}/settlements`);
+      const settleData = await settleRes.json();
+      if (Array.isArray(settleData)) setDbSettlements(settleData);
+
+      // Load expenses from DB
+      const expRes = await fetch(`/api/trips/${trip.id}/expenses`);
+      const expData = await expRes.json();
+      if (Array.isArray(expData)) {
+        const mapped: Expense[] = expData.map((e: any) => ({
+          id: e.id,
+          name: e.title,
+          amount: e.totalAmount,
+          paidBy: e.payerId,
+          participants: e.shares.map((s: any) => s.userId),
+          createdAt: e.createdAt,
+          synced: true,
+        }));
+        setExpenses(mapped);
+      }
+    } finally {
+      if (!isQuiet) setLoadingTrip(false);
+      setIsLoaded(true);
+    }
+  }, [session?.user?.email]);
+
+  // Polling for real-time updates (10s)
+  useEffect(() => {
+    if (!activeTrip) return;
+    
+    // Initial fetch handled by other logic
+    const pollInterval = setInterval(() => {
+      // Re-fetch trip data quietly (true = isQuiet)
+      handleSelectTrip(activeTrip, true);
+    }, 10000);
+
+    return () => clearInterval(pollInterval);
+  }, [activeTrip, handleSelectTrip]);
+
+  const handleJoinByCode = async () => {
+    if (!inviteCodeInput || inviteCodeInput.length < 5) return;
+    setJoining(true);
+    try {
+      const res = await fetch(`/api/join/${inviteCodeInput}`, { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Join failed");
+
+      // Success!
+      setJoinSuccess(`Bạn đã tham gia nhóm ${data.tripTitle}`);
+      setInviteCodeInput("");
+      
+      // Refresh list and select new trip
+      const r = await fetch("/api/trips");
+      const trips = await r.json();
+      if (Array.isArray(trips)) {
+        setMyTrips(trips);
+        const joined = trips.find(t => t.id === data.tripId);
+        if (joined) handleSelectTrip(joined);
+      }
+      
+      setTimeout(() => setJoinSuccess(null), 4000);
+    } catch (e: any) {
+      alert(e.message);
+    } finally {
+      setJoining(false);
+    }
+  };
+
+  const handleGenerateInvite = async () => {
+    if (!activeTrip) return;
+    try {
+      const res = await fetch(`/api/trips/${activeTrip.id}/invite`, { method: "POST" });
+      const data = await res.json();
+      if (data.inviteCode) {
+        setActiveTrip(prev => prev ? { ...prev, inviteCode: data.inviteCode } : prev);
+        navigator.clipboard.writeText(data.inviteUrl);
+        setInviteCopied(true);
+        setTimeout(() => setInviteCopied(false), 2500);
+      }
+    } catch (e) { console.error(e); }
+  };
+
+  // ─── Singleplayer: localStorage fallback ─────────────
+  useEffect(() => {
+    if (isMultiplayer) return; // Skip if in multiplayer mode
+    
+    // Clear states before loading personal data to ensure isolation
+    setMembers([]);
+    setExpenses([]);
+    
     try {
       const savedMembers = localStorage.getItem("optiroute_sb_members");
       const savedExpenses = localStorage.getItem("optiroute_sb_expenses");
@@ -493,20 +475,58 @@ export default function SplitBillPage() {
       setMembers(parsedMembers);
       setExpenses(parsedExpenses);
     } catch (e) {} finally { setIsLoaded(true); }
-  }, [lang]);
+  }, [lang, isMultiplayer]);
 
   useEffect(() => {
-    if (isLoaded) {
+    if (isLoaded && !isMultiplayer) {
       localStorage.setItem("optiroute_sb_members", JSON.stringify(members));
       localStorage.setItem("optiroute_sb_expenses", JSON.stringify(expenses));
     }
-  }, [members, expenses, isLoaded]);
+  }, [members, expenses, isLoaded, isMultiplayer]);
 
-  const addMember = () => {
+  const addMember = async () => {
     const name = memberInput.trim();
-    if (!name || members.find(m => m.name.toLowerCase() === name.toLowerCase())) return;
-    setMembers(prev => [...prev, { id: crypto.randomUUID(), name, color: MEMBER_COLORS[prev.length % MEMBER_COLORS.length] }]);
-    setMemberInput("");
+    if (!name) return;
+
+    if (isMultiplayer && activeTrip) {
+      try {
+        const res = await fetch(`/api/trips/${activeTrip.id}/members`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ identifier: name })
+        });
+        
+        const data = await res.json();
+        
+        if (!res.ok) {
+          if (res.status === 404) {
+            showToast(lang === "vi" ? "Nick này không tồn tại nên không thêm được" : "User not found, could not add", "error");
+          } else if (res.status === 403) {
+            showToast(lang === "vi" ? "Chỉ trưởng nhóm mới được thêm thành viên" : "Only leader can add members", "error");
+          } else {
+            showToast(data.error || "Error adding member", "error");
+          }
+          return;
+        }
+
+        // Success: Refresh trip data to get updated member list
+        handleSelectTrip(activeTrip, true);
+        showToast(lang === "vi" ? `Đã thêm ${data.user?.name || name} vào nhóm!` : `Added ${data.user?.name || name} to trip!`, "success");
+        setMemberInput("");
+      } catch (e) {
+        console.error(e);
+        showToast(lang === "vi" ? "Lỗi kết nối khi thêm thành viên" : "Connection error adding member", "error");
+      }
+    } else {
+      // Offline mode
+      if (members.find(m => m.name.toLowerCase() === name.toLowerCase())) {
+        showToast(lang === "vi" ? "Tên này đã có trong danh sách" : "Name already exists", "error");
+        return;
+      }
+      setMembers(prev => [...prev, { id: crypto.randomUUID(), name, color: MEMBER_COLORS[prev.length % MEMBER_COLORS.length] }]);
+      showToast(lang === "vi" ? "Đã thêm (Lưu tạm trên máy bạn)" : "Added (Saved locally)", "success");
+      setMemberInput("");
+    }
   };
 
   const handleSaveBank = (memberId: string, bankCode: string, bankAccount: string) => {
@@ -523,12 +543,14 @@ export default function SplitBillPage() {
     );
   };
 
-  useEffect(() => {
-    if (showExpForm) {
+  const handleOpenExpForm = () => {
+    if (members.length > 0) {
       setAmountInput("");
-      setExpForm({ name: "", amount: 0, paidBy: "me", participants: members.map(m => m.id) });
+      const defaultPayerId = members.find(m => m.id === "me")?.id || members[0]?.id;
+      setExpForm({ name: "", amount: 0, paidBy: defaultPayerId, participants: members.map(m => m.id) });
+      setShowExpForm(true);
     }
-  }, [showExpForm, members]);
+  };
 
   const handleAmountFocus = () => {
     const raw = amountInput.replace(/\D/g, '');
@@ -554,20 +576,142 @@ export default function SplitBillPage() {
     setExpForm(p => ({ ...p, amount: raw ? parseInt(raw) : 0 }));
   };
 
-  const addExpense = () => {
+  const addExpense = async () => {
     if (!expForm.name || expForm.amount <= 0 || !expForm.paidBy || expForm.participants.length === 0) return;
-    const newExp: Expense = {
-      id: crypto.randomUUID(),
-      name: expForm.name,
-      amount: expForm.amount,
-      paidBy: expForm.paidBy,
-      participants: expForm.participants
-    };
-    setExpenses(prev => [...prev, newExp]);
+    
+    if (isMultiplayer && activeTrip) {
+      // DB mode: POST to API
+      try {
+        const res = await fetch(`/api/trips/${activeTrip.id}/expenses`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: expForm.name,
+            totalAmount: expForm.amount,
+            payerId: expForm.paidBy,
+            participantIds: expForm.participants,
+          }),
+        });
+        if (!res.ok) throw new Error("Failed to add expense");
+        const saved = await res.json();
+        const mapped: Expense = {
+          id: saved.id,
+          name: saved.title,
+          amount: saved.totalAmount,
+          paidBy: saved.payerId,
+          participants: saved.shares.map((s: any) => s.userId),
+          synced: true,
+        };
+        setExpenses(prev => [mapped, ...prev]);
+      } catch (e) {
+        console.error("Failed to add expense", e);
+        return;
+      }
+    } else {
+      // Local mode
+      const newExp: Expense = {
+        id: crypto.randomUUID(),
+        name: expForm.name,
+        amount: expForm.amount,
+        paidBy: expForm.paidBy,
+        participants: expForm.participants
+      };
+      setExpenses(prev => [...prev, newExp]);
+    }
     setShowExpForm(false);
   };
 
-  const removeExpense = (id: string) => setExpenses(prev => prev.filter(e => e.id !== id));
+  const confirmRemoveExpense = async (id: string, reason: string) => {
+    if (deleting) return;
+    setDeleting(true);
+    try {
+      if (isMultiplayer && activeTrip) {
+        await fetch(`/api/trips/${activeTrip.id}/expenses/${id}`, { 
+          method: "DELETE",
+          body: JSON.stringify({ reason })
+        });
+      }
+      setExpenses(prev => prev.filter(e => e.id !== id));
+      setShowDeleteModal(false);
+      setExpenseToDelete(null);
+      setDeleteReason("");
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
+  const handleNotReceived = async (debtorId: string, amount: number, settlementId: string) => {
+    if (!activeTrip) return;
+    const key = `${debtorId}-${activeTrip.id}`;
+    setNotReceiving(key);
+    try {
+      // 1. Send notification
+      await fetch(`/api/trips/${activeTrip.id}/notifications/not-received`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ debtorId, amount }),
+      });
+      
+      // 2. Delete the pending settlement to reset logic
+      const delRes = await fetch(`/api/trips/${activeTrip.id}/settlements/${settlementId}`, {
+        method: "DELETE",
+      });
+
+      if (delRes.ok) {
+        setDbSettlements(prev => prev.filter(s => s.id !== settlementId));
+        showToast(lang === "vi" ? "Đã gửi thông báo nhắc nhở & Hủy yêu cầu cũ!" : "Reminder sent & Old request cancelled!", "success");
+      }
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi khi xử lý" : "Error processing request", "error");
+    } finally {
+      setNotReceiving(null);
+    }
+  };
+
+  const remindPayment = async (debtorId: string, amount: number) => {
+    if (!activeTrip) return;
+    const key = `${debtorId}-${activeTrip.id}`;
+    if (reminding === key) return;
+    setReminding(key);
+    try {
+      await fetch(`/api/trips/${activeTrip.id}/notifications/remind`, {
+        method: "POST",
+        body: JSON.stringify({ debtorId, amount })
+      });
+      const member = members.find(m => m.id === debtorId);
+      showToast(lang === "vi" ? `Đã gửi nhắc nợ cho ${member?.name || "thành viên"}` : `Reminder sent to ${member?.name || "member"}`, "success");
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi khi gửi nhắc nợ" : "Failed to send reminder", "error");
+    } finally {
+      setReminding(null);
+    }
+  };
+
+  const handleRequestBankInfo = async (targetId: string) => {
+    if (!activeTrip) return;
+    setReminding(`request-${targetId}`);
+    try {
+      const res = await fetch(`/api/trips/${activeTrip.id}/notifications/request-bank`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetUserId: targetId })
+      });
+
+      if (!res.ok) throw new Error("Failed to send request");
+
+      const member = members.find(m => m.id === targetId);
+      showToast(lang === "vi" ? `Đã gửi yêu cầu cập nhật STK cho ${member?.name}` : `Sent bank info request to ${member?.name}`, "success");
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi khi gửi yêu cầu" : "Failed to send request", "error");
+    } finally {
+      setReminding(null);
+    }
+  };
   const toggleParticipant = (memberId: string) => {
     setExpForm(prev => ({
       ...prev, participants: prev.participants.includes(memberId)
@@ -575,20 +719,105 @@ export default function SplitBillPage() {
         : [...prev.participants, memberId]
     }));
   };
+  
+  const handleConfirmSettlement = async (settlementId: string) => {
+    if (!activeTrip) return;
+    try {
+      const res = await fetch(`/api/trips/${activeTrip.id}/settlements/${settlementId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "COMPLETED" }),
+      });
+      if (!res.ok) throw new Error("Failed to confirm settlement");
+      
+      const updated = await res.json();
+      setDbSettlements(prev => prev.map(s => s.id === updated.id ? updated : s));
+      
+      // Auto-hide succesful history items after 10s
+      setRecentlyCompletedIds(prev => [...prev, updated.id]);
+      setTimeout(() => {
+        setRecentlyCompletedIds(prev => prev.filter(id => id !== updated.id));
+      }, 10000);
+      
+      const payer = members.find(m => m.id === updated.payerId);
+      showToast(lang === "vi" 
+        ? `Đã xác nhận thanh toán từ ${payer?.name}. Tuyệt vời!` 
+        : `Confirmed payment from ${payer?.name}. Great!`, "success");
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi khi xác nhận thanh toán" : "Error confirming payment", "error");
+    }
+  };
+
+  const handleReportPayment = async (receiptUrl: string, receiverId: string, amount: number) => {
+    if (!activeTrip) return;
+    try {
+      const res = await fetch(`/api/trips/${activeTrip.id}/settlements`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ receiverId, amount, receiptUrl }),
+      });
+      if (!res.ok) throw new Error("Failed to report payment");
+      const newSettle = await res.json();
+      setDbSettlements(prev => [newSettle, ...prev]);
+      setReportSuccess(newSettle.id);
+      
+      // Auto-hide success status after 5 seconds to clear UI
+      setTimeout(() => {
+        setReportSuccess(null);
+      }, 5000);
+      
+      showToast(lang === "vi" ? "Đã gửi báo cáo thanh toán!" : "Payment reported!", "success");
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi khi gửi báo cáo" : "Failed to report", "error");
+    }
+  };
+
+  const handleDeleteSettlement = async (settlementId: string) => {
+    if (!activeTrip) return;
+    if (!confirm(lang === "vi" ? "Bạn có chắc muốn hủy báo cáo thanh toán này?" : "Cancel this payment report?")) return;
+    
+    try {
+      const res = await fetch(`/api/trips/${activeTrip.id}/settlements/${settlementId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("Failed to delete settlement");
+      
+      setDbSettlements(prev => prev.filter(s => s.id !== settlementId));
+      showToast(lang === "vi" ? "Đã hủy báo cáo thanh toán" : "Payment report cancelled", "success");
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi khi hủy báo cáo" : "Error cancelling report", "error");
+    }
+  };
 
   const totalAmount = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
-  const settlements = useMemo(() => calculateSettlements(members, expenses), [members, expenses]);
+  const settlements = useMemo(() => calculateNetSettlements(members, expenses, dbSettlements), [members, expenses, dbSettlements]);
   const getMemberBalance = (memberId: string) => {
     let balance = 0;
     expenses.forEach(exp => {
       if (exp.paidBy === memberId) balance += exp.amount;
       if (exp.participants.includes(memberId)) balance -= exp.amount / exp.participants.length;
     });
+    // Phase 23: Balance with DB Settlements (COMPLETED ONLY)
+    dbSettlements.forEach(s => {
+      if (s.status === "COMPLETED") {
+        if (s.payerId === memberId) balance += s.amount;
+        if (s.receiverId === memberId) balance -= s.amount;
+      }
+    });
     return balance;
   };
 
   const getMember = (id: string) => members.find(m => m.id === id);
-  const myBalance = getMemberBalance("me");
+  
+  // Fintech Logic: Identify Current User for RBAC & Contextual UI
+  const me = members.find(m => m.email === session?.user?.email) || members.find(m => m.id === "me");
+  const myId = me?.id || "me";
+  const amILeader = me?.isLeader;
+
+  const myBalance = getMemberBalance(myId);
   const youOwe = Math.abs(Math.min(myBalance, 0));
   const owedToYou = Math.max(myBalance, 0);
 
@@ -602,9 +831,15 @@ export default function SplitBillPage() {
   if (!isLoaded) return <div className="min-h-screen bg-[#020817]" />;
 
   return (
-    <div className="min-h-screen bg-[#020817] pt-[64px] pb-16 px-4 font-sans">
-      <div className="max-w-5xl mx-auto py-6">
-        
+    <div className="min-h-screen bg-[#020817] pt-[64px] pb-16 px-4 font-sans relative overflow-hidden">
+      {/* Background Decor */}
+      <div className="absolute top-0 left-0 w-full h-96 bg-gradient-to-b from-indigo-500/5 to-transparent pointer-events-none" />
+      <div className="absolute top-40 right-[-10%] w-80 h-80 bg-cyan-500/5 blur-[100px] rounded-full pointer-events-none" />
+        <div className="max-w-5xl mx-auto py-6">
+          {isMultiplayer && meBankMissing && (
+            <BankBanner onAction={() => setShowBankModal(true)} />
+          )}
+
         <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} className="mb-8 flex items-center justify-between">
           <div className="flex items-center gap-4">
             <div className="w-12 h-12 rounded-2xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-center shadow-lg shadow-indigo-500/5">
@@ -616,11 +851,200 @@ export default function SplitBillPage() {
               </h1>
               <p className="text-sm text-slate-400 mt-1 flex items-center gap-1.5">
                 <Activity className="w-3.5 h-3.5" />
-                {lang === "vi" ? "Quản lý chi tiêu minh bạch, sòng phẳng." : "Transparent group expense management."}
+                {isMultiplayer && activeTrip
+                  ? <span className="text-indigo-300 font-bold">{activeTrip.title} {activeTrip.city ? `• ${activeTrip.city}` : ""}</span>
+                  : (lang === "vi" ? "Quản lý chi tiêu minh bạch, sòng phẳng." : "Transparent group expense management.")}
               </p>
             </div>
           </div>
         </motion.div>
+
+        {/* ─── Trip Selector Panel (Multiplayer) ─── */}
+        {session?.user && (
+          <div className="space-y-4 mb-8">
+            <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.1 }}
+              className="flex flex-col lg:flex-row gap-3"
+            >
+              {/* Trip Dropdown */}
+              <div className="relative flex-1 bg-[#0a1128] border border-white/5 rounded-2xl px-4 py-3 flex items-center gap-3 shadow-inner group">
+                <Users className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+                <div className="flex-1 relative h-full flex items-center">
+                  <select
+                    value={activeTrip?.id || ""}
+                    onChange={e => {
+                      const t = myTrips.find(t => t.id === e.target.value);
+                      if (t) handleSelectTrip(t);
+                      else { 
+                        setIsMultiplayer(false); 
+                        setActiveTrip(null); 
+                        setExpenses([]); 
+                        setMembers([{ id: "me", name: lang === "vi" ? "Bạn" : "You", color: MEMBER_COLORS[0] }]); 
+                        localStorage.removeItem("optiroute_last_trip_id"); // Explicit manual clear
+                      }
+                    }}
+                    className="absolute inset-0 w-full h-full opacity-0 z-20 cursor-pointer"
+                  >
+                    <option value="" className="bg-slate-900">— Chế độ cá nhân (Offline) —</option>
+                    {myTrips.map(t => (
+                      <option key={t.id} value={t.id} className="bg-slate-900 font-bold">{t.title}{t.city ? ` • ${t.city}` : ""}</option>
+                    ))}
+                  </select>
+                  <span className="text-white text-sm font-bold truncate">
+                    {activeTrip ? `${activeTrip.title}${activeTrip.city ? ` • ${activeTrip.city}` : ""}` : (lang === "vi" ? "Chế độ cá nhân (Offline)" : "Personal Mode (Offline)")}
+                  </span>
+                </div>
+                {loadingTrip ? (
+                  <Loader2 className="w-4 h-4 text-indigo-400 animate-spin flex-shrink-0" />
+                ) : (
+                   <ChevronDown className="w-4 h-4 text-slate-500 group-hover:text-white transition-colors" />
+                )}
+                {isMultiplayer && !loadingTrip && (
+                  <span className="text-[10px] bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-3 py-1 rounded-full font-black uppercase tracking-[0.2em] flex-shrink-0">
+                    LIVE
+                  </span>
+                )}
+              </div>
+
+              {/* Join by Code Input */}
+              <div className="flex-1 bg-white/[0.03] border border-dashed border-white/20 rounded-2xl px-4 py-3 flex items-center gap-3">
+                <UserPlus className="w-5 h-5 text-indigo-400 flex-shrink-0" />
+                <input 
+                  type="text"
+                  value={inviteCodeInput}
+                  onChange={e => setInviteCodeInput(e.target.value.toUpperCase())}
+                  placeholder={lang === "vi" ? "Nhập mã tham gia..." : "Enter invite code..."}
+                  className="flex-1 bg-transparent text-white text-sm font-medium focus:outline-none"
+                />
+                <button 
+                  onClick={handleJoinByCode}
+                  disabled={joining || !inviteCodeInput}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-xl text-xs font-black uppercase tracking-widest disabled:opacity-50 transition-all flex items-center gap-2"
+                >
+                  {joining ? <Loader2 className="w-3 h-3 animate-spin" /> : <Plus className="w-3 h-3" />}
+                  {lang === "vi" ? "Tham gia" : "Join"}
+                </button>
+              </div>
+            </motion.div>
+
+            {/* Onboarding / Empty State Hint */}
+            {!isMultiplayer && (
+              <motion.div 
+                initial={{ opacity: 0, scale: 0.95 }}
+                animate={{ opacity: 1, scale: 1 }}
+                className="bg-indigo-600/5 border border-white/5 rounded-[2.5rem] p-8 text-center relative overflow-hidden group mb-8 backdrop-blur-sm"
+              >
+                <div className="absolute top-0 right-0 p-4 opacity-10 group-hover:opacity-20 transition-opacity">
+                   <Users className="w-24 h-24 text-indigo-400 rotate-12" />
+                </div>
+                <h3 className="text-xl font-black text-white mb-2">{lang === "vi" ? "Chưa có hành trình nhóm?" : "No Group Trips Yet?"}</h3>
+                <p className="text-sm text-slate-500 max-w-md mx-auto mb-6 leading-relaxed font-medium">
+                  {lang === "vi" 
+                    ? "Hãy bắt đầu bằng cách tạo một chuyến đi mới trên Dashboard hoặc nhập mã mời để cùng bạn bè quản lý chi tiêu sòng phẳng, minh bạch." 
+                    : "Start by creating a new trip on the Dashboard or enter an invite code to manage expenses fairly with your friends."}
+                </p>
+                <div className="flex flex-col sm:flex-row gap-4 justify-center relative z-10">
+                   <motion.button 
+                     whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
+                     onClick={() => router.push('/dashboard')}
+                     className="px-8 py-3.5 bg-indigo-600 text-white rounded-2xl text-xs font-black uppercase tracking-widest shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2 group/btn"
+                   >
+                     <Plus className="w-4 h-4 animate-pulse group-hover/btn:scale-125 transition-transform" />
+                     {lang === "vi" ? "Tạo hành trình ngay" : "Create Trip Now"}
+                   </motion.button>
+                   <div className="px-8 py-3.5 bg-white/5 border border-white/10 text-white rounded-2xl text-xs font-black uppercase tracking-widest flex items-center justify-center gap-2">
+                     <UserPlus className="w-4 h-4 text-indigo-400" />
+                     {lang === "vi" ? "Sử dụng mã mời bên trên" : "Use Invite Code Above"}
+                   </div>
+                </div>
+              </motion.div>
+            )}
+
+            {/* Invite Sharing Panel (Only show if Multiplayer) */}
+            <AnimatePresence>
+              {isMultiplayer && activeTrip && (
+                <motion.div 
+                  initial={{ opacity: 0, height: 0 }} 
+                  animate={{ opacity: 1, height: "auto" }}
+                  exit={{ opacity: 0, height: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="p-5 bg-gradient-to-r from-indigo-500/10 to-transparent border border-indigo-500/20 rounded-3xl flex flex-col sm:flex-row items-center justify-between gap-6">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-500/20 flex items-center justify-center">
+                        <Link2 className="w-6 h-6 text-indigo-400" />
+                      </div>
+                      <div>
+                        <p className="text-xs font-bold text-indigo-300 uppercase tracking-widest mb-1">Mời bạn bè</p>
+                        <p className="text-xs text-slate-500 font-medium">Chia sẻ mã hoặc link để cùng theo dõi chi tiêu</p>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      {activeTrip.inviteCode ? (
+                        <>
+                          {/* Copy Code Button */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase ml-1">Mã tham gia</span>
+                            <button
+                              onClick={() => {
+                                navigator.clipboard.writeText(activeTrip.inviteCode || "");
+                                setCodeCopied(true);
+                                setTimeout(() => setCodeCopied(false), 2000);
+                              }}
+                              className="bg-slate-900 border border-white/10 hover:border-indigo-500/50 px-4 py-2.5 rounded-xl flex items-center gap-3 transition-all group"
+                            >
+                              <code className="text-lg font-black text-indigo-400 font-mono tracking-tighter">
+                                {activeTrip.inviteCode}
+                              </code>
+                              {codeCopied ? <CheckCircle2 className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4 text-slate-600 group-hover:text-white" />}
+                            </button>
+                          </div>
+
+                          {/* Copy Link Button */}
+                          <div className="flex flex-col gap-1">
+                            <span className="text-[9px] font-bold text-slate-500 uppercase ml-1">Link mời nhanh</span>
+                            <button
+                              onClick={() => {
+                                const url = `${window.location.origin}/join/${activeTrip.inviteCode}`;
+                                navigator.clipboard.writeText(url);
+                                setInviteCopied(true);
+                                setTimeout(() => setInviteCopied(false), 2000);
+                              }}
+                              className="bg-indigo-600 hover:bg-indigo-500 text-white px-6 py-2.5 rounded-xl flex items-center gap-3 transition-all shadow-lg shadow-indigo-600/20"
+                            >
+                              <span className="text-xs font-black uppercase tracking-widest">Sao chép Link</span>
+                              {inviteCopied ? <CheckCircle2 className="w-4 h-4" /> : <Link2 className="w-4 h-4" />}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <button onClick={handleGenerateInvite} className="bg-indigo-600 hover:bg-indigo-500 text-white px-8 py-3 rounded-2xl text-xs font-black uppercase tracking-widest transition-all">
+                          Tạo mã mời ngay
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Success Toast */}
+            <AnimatePresence>
+               {joinSuccess && (
+                 <motion.div
+                   initial={{ opacity: 0, scale: 0.9, y: 10 }}
+                   animate={{ opacity: 1, scale: 1, y: 0 }}
+                   exit={{ opacity: 0, scale: 0.9, y: 10 }}
+                   className="flex items-center gap-3 bg-emerald-500 text-white px-5 py-3 rounded-2xl shadow-xl shadow-emerald-500/20 font-bold text-sm"
+                 >
+                   <CheckCircle2 className="w-5 h-5" />
+                   {joinSuccess}
+                 </motion.div>
+               )}
+            </AnimatePresence>
+          </div>
+        )}
+
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
           <motion.div 
@@ -724,13 +1148,36 @@ export default function SplitBillPage() {
                           {member.id === "me" ? <User className="w-5 h-5" /> : member.name[0].toUpperCase()}
                         </div>
                         <div>
-                          <p className="text-sm font-bold text-white">{member.name}</p>
-                          <p className={`text-xs font-bold mt-0.5 ${balance >= 0 ? "text-emerald-400/80" : "text-rose-400/80"}`}>
-                            {balance >= 0 ? "+" : ""}{Math.round(balance).toLocaleString()} ₫
-                          </p>
+                          <div className="flex items-center gap-2">
+                             <p className="text-sm font-bold text-white">{member.name}</p>
+                             {isMultiplayer && (member.isLeader) && (
+                               <span className="text-[8px] bg-amber-500/10 text-amber-500 border border-amber-500/20 px-1.5 py-0.5 rounded font-black uppercase tracking-tighter">
+                                 {lang === "vi" ? "Trưởng nhóm" : "Leader"}
+                               </span>
+                             )}
+                          </div>
+                          <div className="flex items-center gap-2 mt-0.5">
+                            <span className="text-[10px] text-slate-500 font-medium font-mono uppercase truncate opacity-50">
+                              ID: {member.id.substring(0, 8)}...
+                            </span>
+                            <p className={`text-xs font-bold ${balance >= 0 ? "text-emerald-400/80" : "text-rose-400/80"}`}>
+                              {balance >= 0 ? "+" : ""}{Math.round(balance).toLocaleString()} ₫
+                            </p>
+                          </div>
                         </div>
                       </div>
-                      {member.id !== "me" && <button onClick={() => removeMember(member.id)} className="opacity-0 group-hover:opacity-100 text-slate-500 hover:text-rose-400 p-2"><Trash2 className="w-4 h-4" /></button>}
+                      {member.id !== myId && (!isMultiplayer || amILeader) && (
+                        <button 
+                          onClick={() => {
+                            if (confirm(lang === "vi" ? `Xóa ${member.name} khỏi nhóm?` : `Remove ${member.name} from group?`)) {
+                              removeMember(member.id);
+                            }
+                          }} 
+                          className="text-slate-500 hover:text-rose-400 p-2 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      )}
                     </div>
                   );
                 })}
@@ -738,11 +1185,19 @@ export default function SplitBillPage() {
             </div>
           </div>
 
-          <div className="lg:col-span-8 flex flex-col">
+<div className="lg:col-span-8 flex flex-col">
             <div className="flex bg-[#0a1128] border border-white/5 p-1 rounded-2xl w-full sm:w-fit mb-6">
               {(["expenses", "settle"] as const).map(tab => (
                 <button
-                  key={tab} onClick={() => setActiveTab(tab)}
+                  key={tab} 
+                  onClick={() => {
+                    setActiveTab(tab);
+                    if (tab === "settle") {
+                      setTimeout(() => {
+                        document.getElementById("settlement-section")?.scrollIntoView({ behavior: "smooth" });
+                      }, 100);
+                    }
+                  }}
                   className="relative px-6 py-2.5 rounded-xl text-xs font-bold uppercase tracking-wider transition-colors z-10"
                   style={{ color: activeTab === tab ? '#fff' : '#64748b' }}
                 >
@@ -752,17 +1207,17 @@ export default function SplitBillPage() {
               ))}
             </div>
 
-            <div className="flex-1 bg-[#0a1128] border border-white/5 rounded-3xl overflow-hidden flex flex-col relative min-h-[500px]">
+            <div className="flex-1 bg-[#0a1128] border border-white/5 rounded-3xl overflow-hidden shadow-lg flex flex-col relative">
               {activeTab === "expenses" && (
                 <div className="flex flex-col h-full">
-                  <div className="p-6 border-b border-white/5 flex items-center justify-between bg-slate-900/30">
-                    <h2 className="text-lg font-bold text-white flex items-center gap-2"><Receipt className="w-5 h-5 text-indigo-400" /> Lịch sử chi tiêu</h2>
-                    {members.length >= 2 && <button onClick={() => setShowExpForm(true)} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold"><Plus className="w-4 h-4" /> Thêm mới</button>}
+                  <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-slate-900/30">
+                    <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-2"><Receipt className="w-4 h-4 text-indigo-400" /> {lang === "vi" ? "Lịch sử chi tiêu" : "Expense History"}</h2>
+                    {members.length >= 2 && <button onClick={handleOpenExpForm} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold"><Plus className="w-4 h-4" /> Thêm mới</button>}
                   </div>
 
                   <AnimatePresence>
                     {showExpForm && (
-                      <div className="fixed inset-0 z-[70] flex items-center justify-center p-4 overflow-y-auto">
+                      <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 sm:p-6 overflow-hidden">
                         <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={() => setShowExpForm(false)} />
                         <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} exit={{ opacity: 0, scale: 0.95 }}
                           className="relative w-full max-w-lg bg-[#0a1128] border border-white/10 rounded-[24px] shadow-2xl flex flex-col my-auto"
@@ -843,15 +1298,38 @@ export default function SplitBillPage() {
                     {expenses.length === 0 ? <div className="h-full flex flex-col items-center justify-center opacity-40"><Banknote className="w-12 h-12 mb-2" /><p className="text-xs">Chưa có chi tiêu</p></div> : 
                       expenses.map(exp => {
                         const payer = getMember(exp.paidBy);
+                        // Permission check: in offline mode anyone can delete, in multiplayer only owner or payer
+                        const canDelete = !isMultiplayer || amILeader || exp.paidBy === myId;
+                        
                         return (
-                          <div key={exp.id} className="group flex items-center justify-between p-3 bg-black/20 border border-white/5 rounded-2xl">
+                          <div key={exp.id} className="group flex items-center justify-between p-3 bg-black/20 border border-white/5 rounded-2xl hover:border-white/10 transition-colors">
                             <div className="flex items-center gap-3">
                               <div className={`w-10 h-10 rounded-xl ${payer?.color || "bg-slate-700"} flex items-center justify-center text-white text-xs font-black shadow-lg`}>{payer?.name[0].toUpperCase()}</div>
-                              <div><p className="font-bold text-white text-sm">{exp.name}</p><p className="text-[10px] text-slate-500">{payer?.name} trả • Chia {exp.participants.length}</p></div>
+                              <div>
+                                <p className="font-bold text-white text-sm">{exp.name}</p>
+                                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
+                                  <p className="text-[10px] text-slate-500 font-medium">{payer?.name} trả • Chia {exp.participants.length}</p>
+                                  {exp.createdAt && (
+                                    <p className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter bg-white/5 px-1.5 py-0.5 rounded italic">
+                                      {new Date(exp.createdAt).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}
+                                    </p>
+                                  )}
+                                </div>
+                              </div>
                             </div>
                             <div className="flex items-center gap-4">
                               <p className="text-base font-black text-rose-400">{exp.amount.toLocaleString()} ₫</p>
-                              <button onClick={() => removeExpense(exp.id)} className="opacity-0 group-hover:opacity-100 p-1.5 text-slate-500 hover:text-rose-400 transition-all"><Trash2 className="w-4 h-4" /></button>
+                              {canDelete && (
+                                <button 
+                                  onClick={() => {
+                                    setExpenseToDelete(exp);
+                                    setShowDeleteModal(true);
+                                  }} 
+                                  className="p-1.5 text-slate-500 hover:text-rose-400 transition-all"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              )}
                             </div>
                           </div>
                         );
@@ -862,7 +1340,12 @@ export default function SplitBillPage() {
               )}
 
               {activeTab === "settle" && (
-                <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} className="flex flex-col h-full bg-slate-900/20">
+                <motion.div 
+                  id="settlement-section"
+                  initial={{ opacity: 0 }} 
+                  animate={{ opacity: 1 }} 
+                  className="flex flex-col h-full bg-slate-900/20"
+                >
                   <div className="p-6 border-b border-white/5 flex items-center justify-between">
                     <div>
                       <h2 className="text-lg font-bold text-white">Hoàn tiền</h2>
@@ -916,17 +1399,189 @@ export default function SplitBillPage() {
                               </div>
                             </div>
 
-                            <motion.button 
-                              whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}
-                              onClick={() => setQrTarget(s)} 
-                              className="w-full sm:w-auto px-5 py-3.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-2xl shadow-xl shadow-indigo-600/20 flex items-center justify-center gap-2.5 transition-all font-bold tracking-wide"
-                            >
-                              <QrCode className="w-5 h-5" /> 
-                              <span>Tạo QR</span>
-                            </motion.button>
+                            <div className="flex items-center gap-2">
+                              {/* Phase 23: Strict Role-Based Settlement Controls */}
+                              {s.from === myId ? (
+                                // I am the debtor (I owe money) -> I can report payment
+                                toMember?.hasBankInDb ? (
+                                  <div className="flex flex-col items-end gap-1.5">
+                                    {dbSettlements.some(ds => ds.payerId === myId && ds.receiverId === s.to && ds.status === "PENDING") ? (
+                                      <div className="flex items-center gap-2 px-4 py-2 bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 rounded-xl text-xs font-black uppercase tracking-widest cursor-default">
+                                        <CheckCheck className="w-3.5 h-3.5" />
+                                        <span>Đang chờ duyệt</span>
+                                      </div>
+                                    ) : (
+                                      <>
+                                        <button
+                                          onClick={() => setViewingSettlement({ receiver: toMember, amount: s.amount })}
+                                          className="flex items-center gap-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-indigo-600/20 transition-all"
+                                        >
+                                          <QrCode className="w-3.5 h-3.5" />
+                                          <span>Thanh toán</span>
+                                        </button>
+                                        <span className="text-[9px] font-bold text-rose-500/50 uppercase tracking-tighter mr-1">Chưa thanh toán</span>
+                                      </>
+                                    )}
+                                  </div>
+
+                                ) : (
+                                  <button
+                                    onClick={() => handleRequestBankInfo(s.to)}
+                                    disabled={reminding === `request-${s.to}`}
+                                    className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-500/20 text-amber-500 border border-amber-500/20 rounded-xl text-xs font-black uppercase tracking-widest transition-all"
+                                  >
+                                    {reminding === `request-${s.to}` ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <BellRing className="w-3.5 h-3.5" />}
+                                    <span>Yêu cầu STK</span>
+                                  </button>
+                                )
+                              ) : s.to === myId ? (
+                                // I am the creditor (I am owed money) -> I can confirm receipt
+                                (() => {
+                                  const pendingSettle = dbSettlements.find(ds => ds.payerId === s.from && ds.receiverId === myId && ds.status === "PENDING");
+                                  if (pendingSettle) {
+                                    return (
+                                      <div className="flex flex-col sm:flex-row items-center gap-2">
+                                        <button
+                                          onClick={() => handleConfirmSettlement(pendingSettle.id)}
+                                          className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-xs font-black uppercase tracking-widest shadow-lg shadow-emerald-600/20 transition-all"
+                                        >
+                                          <ShieldCheck className="w-3.5 h-3.5" />
+                                          <span>Xác nhận đã nhận</span>
+                                        </button>
+                                        <button
+                                          onClick={() => handleNotReceived(s.from, s.amount, pendingSettle.id)}
+                                          disabled={notReceiving === `${s.from}-${activeTrip?.id}`}
+                                          className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 hover:bg-amber-600 hover:text-white text-amber-500 border border-amber-500/20 rounded-xl text-xs font-black uppercase tracking-widest transition-all group"
+                                        >
+                                          {notReceiving === `${s.from}-${activeTrip?.id}` ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          ) : (
+                                            <BellRing className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+                                          )}
+                                          <span>Chưa nhận được</span>
+                                        </button>
+                                      </div>
+                                    );
+                                  }
+                                  return (
+                                    <div className="flex items-center gap-2">
+                                      <div className="px-3 py-2 bg-slate-800/40 text-slate-500 rounded-lg text-[9px] font-black uppercase tracking-tighter border border-white/5 whitespace-nowrap">
+                                        Đang chờ trả
+                                      </div>
+                                      {isMultiplayer && (
+                                        <button
+                                          onClick={() => remindPayment(s.from, s.amount)}
+                                          disabled={reminding === `${s.from}-${activeTrip?.id}`}
+                                          title={lang === "vi" ? "Gửi nhắc nhở" : "Send reminder"}
+                                          className="flex items-center justify-center p-2 bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white rounded-lg border border-indigo-500/20 transition-all group shadow-lg shadow-indigo-600/10"
+                                        >
+                                          {reminding === `${s.from}-${activeTrip?.id}` ? (
+                                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                          ) : (
+                                            <BellRing className="w-3.5 h-3.5 group-hover:rotate-12 transition-transform" />
+                                          )}
+                                        </button>
+                                      )}
+                                    </div>
+                                  );
+                                })()
+                              ) : (
+                                // Neither debtor nor creditor for this specific settlement
+                                <div className="w-2.5 h-2.5 rounded-full bg-slate-800" />
+                              )}
+                            </div>
                           </motion.div>
                         );
                       })
+                    )}
+
+                    {/* Payment History & Pending Status */}
+                    {isMultiplayer && dbSettlements.length > 0 && (
+                      <div className="mt-8 pt-8 border-t border-white/5">
+                        <h3 className="text-xs font-black text-slate-500 uppercase tracking-[0.2em] mb-4 flex items-center gap-2">
+                           <Activity className="w-3.5 h-3.5 text-indigo-500" />
+                           Lịch sử thanh toán
+                        </h3>
+                        <div className="space-y-3">
+                          {dbSettlements.slice(0, 10).map((ps) => {
+                            const pUser = getMember(ps.payerId);
+                            const rUser = getMember(ps.receiverId);
+                            const isMeReceiver = ps.receiverId === myId;
+                            const isCompleted = ps.status === "COMPLETED";
+                            const isRecentlyDone = recentlyCompletedIds.includes(ps.id);
+
+                            // Auto-hide old completed settlements to clear UI clutter as per user request
+                            if (isCompleted && !isRecentlyDone) return null;
+                            
+                            const timeStr = ps.createdAt ? new Date(ps.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : "";
+                            const dateStr = ps.createdAt ? new Date(ps.createdAt).toLocaleDateString([], { day: '2-digit', month: '2-digit' }) : "";
+
+                            return (
+                              <div key={ps.id} className={`border rounded-2xl p-4 flex items-center justify-between group transition-all hover:bg-white/[0.02] ${isCompleted ? "bg-emerald-500/5 border-emerald-500/10" : "bg-amber-500/5 border-amber-500/10"}`}>
+                                <div className="flex items-center gap-3">
+                                   <div className="relative">
+                                      <div className={`w-10 h-10 rounded-full ${pUser?.color || "bg-slate-700"} flex items-center justify-center text-[10px] font-black text-white shadow-inner`}>
+                                        {pUser?.name[0].toUpperCase()}
+                                      </div>
+                                      <div className={`absolute -bottom-1 -right-1 rounded-full p-1 border-2 border-[#0a1128] ${isCompleted ? "bg-emerald-500" : "bg-amber-500 animate-pulse"}`}>
+                                         {isCompleted ? <Check className="w-2 h-2 text-white" /> : <ArrowUpRight className="w-2 h-2 text-white" />}
+                                      </div>
+                                   </div>
+                                   <div>
+                                      <div className="flex items-center gap-2">
+                                        <p className="text-xs font-bold text-white leading-none">
+                                          {pUser?.name} đã chuyển cho {rUser?.name}
+                                        </p>
+                                        <span className="text-[9px] font-bold text-slate-500 uppercase">{timeStr} • {dateStr}</span>
+                                      </div>
+                                      <p className={`text-lg font-black tabular-nums mt-1 ${isCompleted ? "text-emerald-400" : "text-amber-400"}`}>
+                                        {ps.amount.toLocaleString()} ₫
+                                      </p>
+                                   </div>
+                                </div>
+
+                                <div className="flex items-center gap-4 min-w-[140px] justify-end">
+                                   {isCompleted ? (
+                                      <div className="flex flex-col items-end">
+                                         <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 text-emerald-400 rounded-xl text-[10px] font-black uppercase tracking-widest border border-emerald-500/20">
+                                            <CheckCircle2 className="w-3.5 h-3.5" />
+                                            <span>Đã thanh toán</span>
+                                         </div>
+                                      </div>
+                                   ) : (
+                                     <div className="flex items-center gap-3">
+                                        {ps.payerId === myId && (
+                                           <button 
+                                             onClick={() => handleDeleteSettlement(ps.id)}
+                                             className="p-2.5 text-slate-500 hover:text-rose-500 hover:bg-rose-500/10 rounded-xl transition-all border border-transparent hover:border-rose-500/20"
+                                             title="Hủy yêu cầu"
+                                           >
+                                             <X className="w-4 h-4" />
+                                           </button>
+                                        )}
+                                        {isMeReceiver ? (
+                                           <button 
+                                            onClick={() => handleConfirmSettlement(ps.id)}
+                                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-emerald-600/20"
+                                           >
+                                              Xác nhận
+                                           </button>
+                                        ) : (
+                                          <div className="flex flex-col items-end">
+                                            <span className="text-[10px] font-bold text-amber-500 uppercase tracking-wider flex items-center gap-1.5">
+                                              <Loader2 className="w-3 h-3 animate-spin" />
+                                              Đang chờ duyệt
+                                            </span>
+                                          </div>
+                                        )}
+                                     </div>
+                                   )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
                     )}
                   </div>
                 </motion.div>
@@ -937,38 +1592,168 @@ export default function SplitBillPage() {
       </div>
       <AnimatePresence>
         {qrTarget && (
-          <VietQRModal 
-            settlement={qrTarget} 
-            members={members} 
-            onClose={() => setQrTarget(null)} 
-            onSaveBank={handleSaveBank} 
-            onConfirmSettle={(s) => {
-               setExpenses(prev => [...prev, {
-                 id: crypto.randomUUID(),
-                 name: `💸 Thanh toán dư nợ cho ${members.find(m => m.id === s.to)?.name || "Người nhận"}`,
-                 amount: s.amount,
-                 paidBy: s.from,
-                 participants: [s.to]
-               }]);
-               
-               try {
-                 const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
-                 const osc = ctx.createOscillator();
-                 const gain = ctx.createGain();
-                 osc.connect(gain);
-                 gain.connect(ctx.destination);
-                 osc.type = 'sine';
-                 osc.frequency.setValueAtTime(800, ctx.currentTime);
-                 osc.frequency.exponentialRampToValueAtTime(1400, ctx.currentTime + 0.15);
-                 gain.gain.setValueAtTime(0, ctx.currentTime);
-                 gain.gain.linearRampToValueAtTime(0.15, ctx.currentTime + 0.05);
-                 gain.gain.linearRampToValueAtTime(0, ctx.currentTime + 0.5);
-                 osc.start(); osc.stop(ctx.currentTime + 0.5);
-               } catch(e) { console.error("Audio block", e); }
+          <PaymentModal 
+            isOpen={!!qrTarget}
+            receiver={members.find(m => m.id === qrTarget.to) || { id: qrTarget.to, name: "?" }}
+            amount={qrTarget.amount}
+            tripId={activeTrip?.id || ""}
+            onClose={() => setQrTarget(null)}
+            onSuccess={(newSettle: DB_Settlement) => {
+              setDbSettlements(prev => [newSettle, ...prev]);
+              setQrTarget(null);
             }}
           />
         )}
       </AnimatePresence>
+
+      {/* Receipt Viewer Modal */}
+      <AnimatePresence>
+        {viewingReceipt && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] bg-black/95 backdrop-blur-3xl flex flex-col items-center justify-center p-6"
+            onClick={() => setViewingReceipt(null)}
+          >
+            <button className="absolute top-6 right-6 p-4 bg-white/10 hover:bg-white/20 rounded-full text-white transition-all">
+               <X className="w-8 h-8" />
+            </button>
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.9, opacity: 0 }}
+              className="max-w-xl w-full"
+              onClick={e => e.stopPropagation()}
+            >
+               <h3 className="text-center text-white font-black uppercase tracking-[0.3em] mb-6">Biên lai thanh toán</h3>
+               <div className="bg-white p-2 rounded-3xl shadow-[0_0_100px_rgba(99,102,241,0.5)]">
+                  <img src={viewingReceipt} alt="Receipt" className="w-full rounded-2xl" />
+               </div>
+               <p className="text-center text-slate-500 text-xs mt-6 font-medium italic">Vui lòng kiểm tra kỹ số tiền và nội dung trước khi xác nhận.</p>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showDeleteModal && expenseToDelete && (
+          <DeleteReasonModal 
+            expense={expenseToDelete}
+            reason={deleteReason}
+            setReason={setDeleteReason}
+            loading={deleting}
+            onClose={() => setShowDeleteModal(false)}
+            onConfirm={(r) => confirmRemoveExpense(expenseToDelete.id, r)}
+          />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {showBankModal && (
+          <BankSettingsModal 
+            isOpen={showBankModal} 
+            onClose={() => setShowBankModal(false)}
+            onSuccess={() => {
+              setMeBankMissing(false); // Immediate UI sync
+              if (activeTrip) handleSelectTrip(activeTrip, true);
+            }}
+          />
+        )}
+        {viewingSettlement && (
+          <PaymentModal
+            isOpen={!!viewingSettlement}
+            onClose={() => setViewingSettlement(null)}
+            receiver={viewingSettlement.receiver}
+            amount={viewingSettlement.amount}
+            tripId={activeTrip?.id || ""}
+            onSuccess={(newSettle: DB_Settlement) => {
+              setDbSettlements(prev => [newSettle, ...prev]);
+              setViewingSettlement(null);
+            }}
+          />
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+// Main Page wrapper with Suspense (required for useSearchParams in App Router)
+export default function SplitBillPage() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen bg-[#020617] flex items-center justify-center">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="w-12 h-12 text-indigo-500 animate-spin" />
+          <p className="text-slate-500 font-medium animate-pulse text-sm uppercase tracking-widest">Đang tải dữ liệu...</p>
+        </div>
+      </div>
+    }>
+      <SplitBillContent />
+    </Suspense>
+  );
+}
+
+{/* --- Delete Reason Modal --- */}
+function DeleteReasonModal({ 
+  expense, 
+  onClose, 
+  onConfirm, 
+  loading, 
+  reason, 
+  setReason 
+}: { 
+  expense: Expense; 
+  onClose: () => void; 
+  onConfirm: (r: string) => void; 
+  loading: boolean;
+  reason: string;
+  setReason: (r: string) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+      <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => !loading && onClose()} />
+      <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+        className="relative w-full max-w-sm bg-[#0a1128] border border-white/10 rounded-[28px] shadow-2xl overflow-hidden p-6"
+      >
+        <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto mb-4 border border-rose-500/20">
+          <Trash2 className="w-8 h-8 text-rose-500" />
+        </div>
+        <h3 className="text-xl font-black text-white text-center mb-1">Xác nhận xóa?</h3>
+        <p className="text-slate-400 text-sm text-center mb-6 px-4 leading-relaxed">Khoản chi <strong className="text-white">"{expense.name}"</strong> sẽ bị gỡ bỏ vĩnh viễn và thông báo cho mọi người.</p>
+        
+        <div className="space-y-2 mb-8">
+          <p className="text-[10px] font-black uppercase tracking-widest text-indigo-400 px-1 mb-2">Lý do xóa (Audit Log)</p>
+          {[
+            "Nhập sai số tiền/thông tin",
+            "Giao dịch bị trùng lặp",
+            "Đã thanh toán bằng tiền mặt",
+            "Dịch vụ bị hủy/hoàn trả",
+            "Lý do khác"
+          ].map(r => (
+            <button 
+              key={r}
+              onClick={() => setReason(r)}
+              className={`w-full text-left px-4 py-3 rounded-xl border text-xs font-bold transition-all ${reason === r ? "bg-indigo-600 border-indigo-400 text-white shadow-lg" : "bg-slate-900 border-white/5 text-slate-500 hover:bg-white/5"}`}
+            >
+              {r}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex gap-3">
+          <button 
+            disabled={loading}
+            onClick={onClose} 
+            className="flex-1 py-3 text-slate-500 hover:text-white font-bold text-xs uppercase transition-colors"
+          >
+            Hủy
+          </button>
+          <button 
+            disabled={!reason || loading}
+            onClick={() => onConfirm(reason)}
+            className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-900/20 disabled:opacity-20 transition-all flex items-center justify-center gap-2"
+          >
+            {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : "Xác nhận xóa"}
+          </button>
+        </div>
+      </motion.div>
     </div>
   );
 }

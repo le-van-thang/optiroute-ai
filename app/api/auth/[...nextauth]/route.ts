@@ -56,10 +56,33 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt"
   },
   callbacks: {
+    async signIn({ user, account }) {
+      if (account?.provider === "google" || account?.provider === "facebook") {
+        if (!user.email) return false;
+        await prisma.user.upsert({
+          where: { email: user.email },
+          update: {
+            name: user.name,
+          },
+          create: {
+            email: user.email,
+            name: user.name,
+            passwordHash: "", // Social accounts don't use this
+          },
+        });
+      }
+      return true;
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id;
         token.role = (user as any).role;
+      } else if (token.email) {
+        // Social login persistence check: Ensure we have the DB UUID
+        const dbUser = await prisma.user.findUnique({ where: { email: token.email } });
+        if (dbUser) {
+          token.id = dbUser.id;
+        }
       }
       return token;
     },

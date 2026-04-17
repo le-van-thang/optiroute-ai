@@ -3,7 +3,8 @@ import { getServerSession } from "next-auth/next";
 import { authOptions } from "@/app/api/auth/[...nextauth]/route";
 import prisma from "@/lib/prisma";
 
-export async function GET(req: Request) {
+// GET /api/notifications — Lấy thông báo của user hiện tại (polling mỗi 30s)
+export async function GET() {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
@@ -13,56 +14,41 @@ export async function GET(req: Request) {
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
     });
-
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    const trips = await prisma.trip.findMany({
-      where: {
-        OR: [
-          { userId: user.id },
-          { groupMembers: { some: { userId: user.id } } }
-        ]
-      },
+    const notifications = await prisma.notification.findMany({
+      where: { userId: user.id },
       orderBy: { createdAt: "desc" },
+      take: 20,
     });
 
-    return NextResponse.json(trips);
+    const unreadCount = notifications.filter((n) => !n.isRead).length;
+
+    return NextResponse.json({ notifications, unreadCount });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
 
-export async function POST(req: Request) {
+// PATCH /api/notifications — Đánh dấu tất cả là đã đọc
+export async function PATCH() {
   try {
     const session = await getServerSession(authOptions);
     if (!session?.user?.email) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { title, city, startDate, endDate, budget } = await req.json();
-
-    if (!title) {
-      return NextResponse.json({ error: "Title is required" }, { status: 400 });
-    }
-
     const user = await prisma.user.findUnique({
       where: { email: session.user.email },
     });
-
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
-    const trip = await prisma.trip.create({
-      data: {
-        title,
-        city,
-        startDate: startDate ? new Date(startDate) : null,
-        endDate: endDate ? new Date(endDate) : null,
-        budget: budget ? parseFloat(budget) : null,
-        userId: user.id,
-      },
+    await prisma.notification.updateMany({
+      where: { userId: user.id, isRead: false },
+      data: { isRead: true },
     });
 
-    return NextResponse.json(trip, { status: 201 });
+    return NextResponse.json({ message: "All marked as read" });
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

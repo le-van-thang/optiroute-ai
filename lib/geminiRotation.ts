@@ -4,7 +4,7 @@
  * Automatically rotates to next key on rate limit (429/503) errors.
  */
 
-import { GoogleGenerativeAI, Content, Part } from "@google/generative-ai";
+import { GoogleGenerativeAI, Content, Part, HarmCategory, HarmBlockThreshold } from "@google/generative-ai";
 
 // Collect all valid keys from env (supports GEMINI_API_KEY_1 to GEMINI_API_KEY_20)
 function getApiKeys(): string[] {
@@ -68,6 +68,18 @@ export async function generateWithRotation(params: GeminiRequest): Promise<strin
       const genAI = new GoogleGenerativeAI(key);
       const model = genAI.getGenerativeModel({
         model: params.modelName || "gemini-2.5-flash",
+        safetySettings: [
+          { category: HarmCategory.HARM_CATEGORY_HARASSMENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_HATE_SPEECH, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_SEXUALLY_EXPLICIT, threshold: HarmBlockThreshold.BLOCK_NONE },
+          { category: HarmCategory.HARM_CATEGORY_DANGEROUS_CONTENT, threshold: HarmBlockThreshold.BLOCK_NONE },
+        ],
+        generationConfig: {
+          temperature: 0.7,
+          topP: 0.95,
+          topK: 64,
+          maxOutputTokens: 8192,
+        }
       });
 
       const chatSession = model.startChat({
@@ -89,8 +101,9 @@ export async function generateWithRotation(params: GeminiRequest): Promise<strin
       lastError = error instanceof Error ? error : new Error(String(error));
 
       if (isQuotaError(error)) {
-        console.warn(`[Gemini Rotation] ${keyLabel} bị rate limit/overload → thử key tiếp theo...`);
-        // Continue to next key
+        console.warn(`[Gemini Rotation] ${keyLabel} bị rate limit/overload → nghỉ 1s rồi thử key tiếp theo...`);
+        // Add a small delay to avoid hammering the API
+        await new Promise(resolve => setTimeout(resolve, 1000));
         continue;
       }
 
