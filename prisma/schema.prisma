@@ -24,7 +24,14 @@ model User {
   email             String         @unique
   passwordHash      String
   name              String?
+  image             String?
+  country           String?         @default("Việt Nam")
+  phone             String?
+  twoFactorEnabled  Boolean         @default(false)
+  twoFactorMethod   String?         @default("EMAIL")
   role              Role           @default(USER)
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
   travelDNA         Json?
   // Phase 21: Bank info for secure QR generation
   bankName          String?
@@ -41,8 +48,29 @@ model User {
   payerSettlements   Settlement[]   @relation("PayerSettlements")
   receiverSettlements Settlement[]  @relation("ReceiverSettlements")
 
-  // Phase 23: Persistence for split-bill active group
+  // Phase 23: Gamification & Economy
+  points            Int             @default(500)
+  inventory         Json?           @default("[]")
   lastActiveTripId  String?
+
+  // Phase 24: Real 2FA (Real Email/SMS)
+  verificationCode  String?
+  codeExpires       DateTime?
+
+  // Phase 25: Social Hub & Messenger
+  sentRequests      Friendship[]   @relation("SentRequests")
+  receivedRequests  Friendship[]   @relation("ReceivedRequests")
+  conversations     Conversation[] @relation("UserConversations")
+  messages          Message[]
+
+  // Security & Admin
+  blocksSent        Block[]        @relation("Blocker")
+  blocksReceived    Block[]        @relation("Blocked")
+  reportsSent       Report[]       @relation("Reporter")
+  reportsReceived   Report[]       @relation("Reported")
+
+  // Privilege & Privacy Settings
+  acceptMessages    Boolean         @default(true)
 }
 
 model Place {
@@ -163,4 +191,79 @@ model JournalEntry {
   textContent String?
   imageUrl    String   // Cloudinary secure_url
   createdAt   DateTime @default(now())
+}
+
+// Phase 25: Social Hub & Messenger Models
+model Friendship {
+  id          String   @id @default(uuid())
+  senderId    String
+  sender      User     @relation("SentRequests", fields: [senderId], references: [id], onDelete: Cascade)
+  receiverId  String
+  receiver    User     @relation("ReceivedRequests", fields: [receiverId], references: [id], onDelete: Cascade)
+  status      String   @default("PENDING") // PENDING, ACCEPTED, REJECTED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([senderId, receiverId])
+}
+
+model Conversation {
+  id        String    @id @default(uuid())
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  
+  messages  Message[]
+  users     User[]    @relation("UserConversations")
+  clearedAt Json?     // Structure: {"userId": "ISO_DATE_STRING"}
+}
+
+model Message {
+  id             String       @id @default(uuid())
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  senderId       String
+  sender         User         @relation(fields: [senderId], references: [id], onDelete: Cascade)
+  content        String
+  type           String       @default("TEXT") // TEXT, IMAGE, AUDIO
+  fileUrl        String?      // Cloudinary URL for media
+  createdAt      DateTime     @default(now())
+
+  // Reply functionality
+  replyToId      String?
+  replyTo        Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
+  replies        Message[]    @relation("MessageReplies")
+}
+
+model Block {
+  id        String   @id @default(uuid())
+  blockerId String
+  blocker   User     @relation("Blocker", fields: [blockerId], references: [id], onDelete: Cascade)
+  blockedId String
+  blocked   User     @relation("Blocked", fields: [blockedId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([blockerId, blockedId])
+}
+
+model Report {
+  id             String   @id @default(uuid())
+  reporterId     String
+  reporter       User     @relation("Reporter", fields: [reporterId], references: [id], onDelete: Cascade)
+  reportedId     String
+  reported       User     @relation("Reported", fields: [reportedId], references: [id], onDelete: Cascade)
+  conversationId String?
+  reason         String
+  content        String?
+  status         String   @default("PENDING") // PENDING, RESOLVED, DISMISSED
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+model SystemConfig {
+  id                 String   @id @default("GLOBAL_CONFIG")
+  siteName           String   @default("OptiRoute AI")
+  maintenanceMode    Boolean  @default(false)
+  allowRegistration  Boolean  @default(true)
+  supportEmail       String?  @default("support@optiroute.ai")
+  adminNotifications Boolean  @default(true)
+  updatedAt          DateTime @updatedAt
 }
