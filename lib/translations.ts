@@ -31,6 +31,9 @@ export const translations = {
       getStarted: "Bắt đầu ngay",
       journal: "Nhật ký",
       langTitle: "Chuyển sang Tiếng Anh",
+      profile: "Hồ sơ",
+      settings: "Cài đặt",
+      bankInfo: "STK nhận tiền",
     },
     home: {
       badge: "Trợ lý du lịch AI thế hệ mới",
@@ -191,6 +194,9 @@ export const translations = {
       getStarted: "Get Started",
       journal: "Journal",
       langTitle: "Switch to Vietnamese",
+      profile: "Profile",
+      settings: "Settings",
+      bankInfo: "Bank Info",
     },
     home: {
       badge: "Next-Gen AI Travel Concierge",

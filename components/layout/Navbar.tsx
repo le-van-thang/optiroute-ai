@@ -4,7 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { MapIcon, Receipt, Route, LayoutDashboard, LogOut, User, Bell, Camera, CheckCircle2, Landmark, CreditCard, Trash2 } from "lucide-react";
+import { 
+  MapIcon, Receipt, Route, LayoutDashboard, LogOut, User, 
+  Bell, Camera, CheckCircle2, Landmark, CreditCard, Trash2,
+  ChevronDown, Settings, Mail, Fingerprint, Users, Copy, Check 
+} from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
 import { BankSettingsModal } from "@/components/split-bill/BankSettingsModal";
@@ -17,8 +21,10 @@ interface NotificationData {
   createdAt: string;
 }
 
+import { pusherClient } from "@/lib/pusher";
+
 export function Navbar() {
-  const { data: session, status } = useSession();
+  const { data: session, status, update } = useSession();
   const pathname = usePathname();
   const { lang, setLang, t } = useLang();
   
@@ -27,14 +33,89 @@ export function Navbar() {
   const [notifications, setNotifications] = useState<NotificationData[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [showNotifications, setShowNotifications] = useState(false);
+  const [showUserDropdown, setShowUserDropdown] = useState(false);
+  const [copiedId, setCopiedId] = useState(false);
+  
+  const handleCopyId = (id: string) => {
+    const idString = `#${id.slice(-6).toUpperCase()}`;
+    navigator.clipboard.writeText(idString);
+    setCopiedId(true);
+    setTimeout(() => setCopiedId(false), 2000);
+  };
   const [showBankModal, setShowBankModal] = useState(false);
+  const [supportEmail, setSupportEmail] = useState<string>("");
+  const [verifiedRole, setVerifiedRole] = useState<string | null>(session?.user?.role || null);
+  
   const dropdownRef = useRef<HTMLDivElement>(null);
+  const userDropdownRef = useRef<HTMLDivElement>(null);
 
-  // Close dropdown on outside click
+  // Lắng nghe email hỗ trợ và thay đổi quyền hạn Real-time
+  useEffect(() => {
+    const fetchSupport = async () => {
+      try {
+        const res = await fetch("/api/system/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.supportEmail) setSupportEmail(data.supportEmail);
+        }
+      } catch (err) {}
+    };
+
+    const fetchVerifiedRole = async () => {
+      if (!session?.user?.id) return;
+      try {
+        const res = await fetch("/api/auth/verify-role");
+        if (res.ok) {
+          const data = await res.json();
+          setVerifiedRole(data.role);
+          
+          // Nếu vai trò DB khác với Session hiện tại, ép buộc cập nhật để đồng bộ Cookie
+          if (data.role !== session.user.role) {
+            await update({
+              ...session,
+              user: { ...session.user, role: data.role }
+            });
+          }
+        }
+      } catch (err) {}
+    };
+
+    fetchSupport();
+    fetchVerifiedRole();
+
+    // Lắng nghe thay đổi vai trò (Role Sync - Kênh Private)
+    const client = pusherClient;
+    if (session?.user?.id && client) {
+      const channel = client.subscribe(`private-user-${session.user.id}`);
+      
+      channel.bind("role-updated", async (data: { role: string }) => {
+        // Cập nhật trạng thái UI NGAY LẬP TỨC
+        setVerifiedRole(data.role);
+
+        // Cập nhật lại JWT Session ngầm
+        await update({ 
+          ...session, 
+          user: { ...session.user, role: data.role } 
+        });
+        
+        // Làm mới trang sau khi cập nhật session để đồng bộ triệt để
+        window.location.reload();
+      });
+
+      return () => {
+        client.unsubscribe(`private-user-${session.user.id}`);
+      };
+    }
+  }, [session?.user?.id]);
+
+  // Close dropdowns on outside click
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
         setShowNotifications(false);
+      }
+      if (userDropdownRef.current && !userDropdownRef.current.contains(event.target as Node)) {
+        setShowUserDropdown(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
@@ -94,6 +175,12 @@ export function Navbar() {
 
   const isActive = (path: string) => pathname?.startsWith(path);
 
+  // Helper to format ID
+  const shortId = (id?: string) => {
+    if (!id) return "";
+    return id.length > 8 ? `#${id.slice(-6)}` : `#${id}`;
+  };
+
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-white/10">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
@@ -103,7 +190,10 @@ export function Navbar() {
             <div className="bg-indigo-600 p-1.5 rounded-lg">
               <MapIcon className="h-6 w-6 text-white" />
             </div>
-            <Link href="/" className="font-bold text-xl tracking-tight text-white flex items-center gap-1">
+            <Link 
+              href={session ? "/dashboard" : "/"} 
+              className="font-bold text-xl tracking-tight text-white flex items-center gap-1"
+            >
               OptiRoute <span className="text-indigo-400">AI</span>
             </Link>
           </div>
@@ -149,6 +239,19 @@ export function Navbar() {
                   >
                     <Camera className="h-4 w-4" />
                     {navT.journal}
+                  </Link>
+                </motion.div>
+                <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                  <Link
+                    href="/social"
+                    className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+                      isActive("/social")
+                        ? "bg-white/10 text-white"
+                        : "text-gray-300 hover:text-white hover:bg-white/5"
+                    }`}
+                  >
+                    <Users className="h-4 w-4" />
+                    {lang === 'vi' ? 'Kết nối' : 'Social'}
                   </Link>
                 </motion.div>
                 <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
@@ -251,7 +354,7 @@ export function Navbar() {
                                <Bell className="w-8 h-8 text-slate-700" />
                             </div>
                             <p className="text-xs font-bold text-slate-500 uppercase tracking-widest leading-relaxed">
-                               Không có thông báo mới nào dành cho bạn
+                                Không có thông báo mới nào dành cho bạn
                             </p>
                           </div>
                         ) : (
@@ -292,8 +395,6 @@ export function Navbar() {
                                       })()} 
                                       onClick={(e) => {
                                         setShowNotifications(false);
-                                        // If already on split-bill, the Link might not trigger the useEffect unless we force a refresh or use state
-                                        // But searchParams change should trigger it.
                                       }}
                                       className={`group block p-4 rounded-2xl transition-all relative overflow-hidden ${!notif.isRead ? 'bg-white/[0.03] hover:bg-white/[0.06]' : 'opacity-60 hover:opacity-100 hover:bg-white/5'}`}
                                     >
@@ -358,8 +459,8 @@ export function Navbar() {
             {status === "loading" ? (
               <div className="h-8 w-24 bg-white/10 animate-pulse rounded-md"></div>
             ) : session ? (
-              <div className="flex items-center gap-3">
-                {session.user?.role === "ADMIN" && (
+              <div className="flex items-center gap-3 relative" ref={userDropdownRef}>
+                {verifiedRole === "ADMIN" && (
                   <Link
                     href="/admin"
                     className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 bg-rose-500/10 text-rose-400 hover:bg-rose-500/20 hover:text-rose-300 rounded-md text-sm font-medium transition-colors border border-rose-500/20"
@@ -368,28 +469,139 @@ export function Navbar() {
                     {navT.admin}
                   </Link>
                 )}
-                <div className="hidden sm:flex items-center gap-2 text-sm text-gray-300 pl-2 border-l border-white/10 group relative">
-                  <div className="h-8 w-8 rounded-full bg-indigo-900/50 flex items-center justify-center border border-indigo-500/30 group-hover:bg-indigo-500/10 transition-colors">
-                    <User className="h-4 w-4 text-indigo-300" />
-                  </div>
-                  <div className="flex flex-col">
-                    <span className="font-medium truncate max-w-[100px] leading-tight">{session.user?.name || navT.user}</span>
-                    <button 
-                      onClick={() => setShowBankModal(true)}
-                      className="text-[9px] font-black uppercase text-indigo-400 hover:text-indigo-300 transition-colors flex items-center gap-1"
-                    >
-                      <Landmark className="w-2.5 h-2.5" />
-                      {lang === "vi" ? "STK nhận tiền" : "Receiving Info"}
-                    </button>
-                  </div>
-                </div>
-                <button
-                  onClick={() => signOut({ callbackUrl: "/" })}
-                  className="flex items-center gap-2 text-sm font-medium text-red-500 hover:text-red-400 hover:bg-red-500/10 px-3 py-1.5 rounded-md transition-colors"
+                
+                {/* User Dropdown Trigger */}
+                <motion.button
+                  whileHover={{ scale: 1.02 }}
+                  whileTap={{ scale: 0.98 }}
+                  onClick={() => setShowUserDropdown(!showUserDropdown)}
+                  className={`flex items-center gap-3 pl-3 pr-2 py-1.5 rounded-full transition-all duration-300 border ${
+                    showUserDropdown 
+                    ? 'bg-indigo-500/20 border-indigo-500/50 shadow-[0_0_20px_rgba(99,102,241,0.2)]' 
+                    : 'bg-white/5 border-white/10 hover:bg-white/10 hover:border-white/20'
+                  }`}
                 >
-                  <LogOut className="h-4 w-4" />
-                  {navT.logout}
-                </button>
+                  <div className="flex flex-col items-end hidden sm:flex">
+                    <span className="text-xs font-bold text-white leading-none mb-0.5">
+                      {session.user?.name || navT.user}
+                    </span>
+                    <span className="text-[9px] font-black text-indigo-400/80 tracking-tighter uppercase">
+                      {shortId(session.user?.id)}
+                    </span>
+                  </div>
+                  <div className="h-8 w-8 rounded-full bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 overflow-hidden">
+                    {session.user?.image ? (
+                       <img src={session.user.image} alt="Avatar" className="w-full h-full object-cover" />
+                    ) : (
+                       <User className="h-4 w-4 text-white" />
+                    )}
+                  </div>
+                  <ChevronDown className={`w-4 h-4 text-gray-500 transition-transform duration-300 ${showUserDropdown ? 'rotate-180 text-white' : ''}`} />
+                </motion.button>
+
+                <AnimatePresence>
+                  {showUserDropdown && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 10, scale: 0.95, filter: "blur(10px)" }}
+                      animate={{ opacity: 1, y: 0, scale: 1, filter: "blur(0px)" }}
+                      exit={{ opacity: 0, y: 10, scale: 0.95, filter: "blur(10px)" }}
+                      className="absolute right-0 top-full mt-3 w-64 bg-[#0a1128]/95 backdrop-blur-3xl border border-white/10 rounded-[28px] shadow-[0_30px_70px_rgba(0,0,0,0.8)] overflow-hidden z-50 origin-top-right ring-1 ring-white/5"
+                    >
+                      {/* User Header */}
+                      <div className="p-4 bg-gradient-to-br from-indigo-500/[0.08] to-transparent border-b border-white/5">
+                        <div className="flex items-center gap-3 mb-3">
+                          <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center shadow-lg shadow-indigo-500/20 overflow-hidden shrink-0">
+                            {session.user?.image ? (
+                               <img src={session.user.image} alt="Avatar" className="w-full h-full object-cover" />
+                            ) : (
+                               <User className="w-5 h-5 text-white" />
+                            )}
+                          </div>
+                          <div className="flex flex-col min-w-0">
+                            <p className="text-xs font-black text-white truncate">
+                              {session.user?.name}
+                            </p>
+                            <p className="text-[9px] text-slate-500 font-bold truncate flex items-center gap-1 mt-0.5">
+                              {session.user?.email}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="bg-white/[0.03] rounded-xl px-3 py-1.5 border border-white/5 flex items-center justify-between">
+                            <span className="text-[8px] font-black text-slate-500 uppercase tracking-widest">User ID</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-[9px] font-mono text-indigo-400 font-bold tracking-tight">
+                                {shortId(session.user?.id)}
+                              </span>
+                              <button 
+                                onClick={() => handleCopyId(session.user.id)}
+                                className={`transition-all ${copiedId ? 'text-emerald-400' : 'text-slate-600 hover:text-white'}`}
+                              >
+                                {copiedId ? <Check className="w-2.5 h-2.5" /> : <Copy className="w-2.5 h-2.5" />}
+                              </button>
+                            </div>
+                        </div>
+                      </div>
+
+                      {/* Menu Items */}
+                      <div className="p-1.5 space-y-0.5">
+                        <Link href="/profile" onClick={() => setShowUserDropdown(false)} className="block">
+                          <div className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all group">
+                            <div className="w-8 h-8 rounded-lg bg-indigo-500/10 flex items-center justify-center group-hover:scale-110 group-hover:bg-indigo-500 group-hover:text-white transition-all duration-300">
+                              <User className="w-3.5 h-3.5" />
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-wider">{navT.profile}</span>
+                          </div>
+                        </Link>
+
+                        <Link href="/settings" onClick={() => setShowUserDropdown(false)} className="block">
+                          <div className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all group">
+                            <div className="w-8 h-8 rounded-lg bg-slate-500/10 flex items-center justify-center group-hover:scale-110 group-hover:bg-slate-500 group-hover:text-white transition-all duration-300">
+                              <Settings className="w-3.5 h-3.5" />
+                            </div>
+                            <span className="text-[10px] font-black uppercase tracking-wider">{navT.settings}</span>
+                          </div>
+                        </Link>
+
+                        <button 
+                          onClick={() => {
+                            setShowUserDropdown(false);
+                            setShowBankModal(true);
+                          }}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-white/5 text-slate-400 hover:text-white transition-all group text-left"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-emerald-500/10 flex items-center justify-center group-hover:scale-110 group-hover:bg-emerald-500 group-hover:text-white transition-all duration-300">
+                            <Landmark className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-wider">{navT.bankInfo}</span>
+                        </button>
+                      </div>
+
+                      {/* Contact Support Block - Compacted and Accented */}
+                      <div className="mx-1.5 mb-1.5 p-3 bg-indigo-500/[0.03] rounded-2xl border border-indigo-500/10 flex items-center gap-3">
+                         <div className="w-7 h-7 rounded-lg bg-indigo-500/10 flex items-center justify-center text-indigo-400 shadow-inner">
+                            <Mail className="w-3 h-3" />
+                         </div>
+                         <div className="flex flex-col min-w-0">
+                            <p className="text-[8px] font-black text-indigo-400/60 uppercase tracking-widest leading-none mb-1">Hỗ trợ 24/7</p>
+                            <p className="text-[9px] font-black text-white truncate tracking-tight">{supportEmail || "support@optiroute.ai"}</p>
+                         </div>
+                      </div>
+
+                      {/* Logout Section */}
+                      <div className="p-1.5 border-t border-white/5 bg-black/10">
+                        <button
+                          onClick={() => signOut({ callbackUrl: "/" })}
+                          className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-rose-500/10 text-rose-500 transition-all group text-left"
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-rose-500/10 flex items-center justify-center group-hover:bg-rose-500 group-hover:text-white transition-all duration-300">
+                            <LogOut className="w-3.5 h-3.5" />
+                          </div>
+                          <span className="text-[10px] font-black uppercase tracking-widest">{navT.logout}</span>
+                        </button>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
               </div>
             ) : (
               <div className="flex items-center gap-2">

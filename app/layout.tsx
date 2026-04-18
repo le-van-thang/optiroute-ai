@@ -2,10 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import AuthProvider from "@/components/providers/AuthProvider";
 import { LangProvider } from "@/components/providers/LangProvider";
-import { Navbar } from "@/components/layout/Navbar";
-import { Chatbot } from "@/components/ui/Chatbot";
 import { ToastProvider } from "@/components/providers/ToastProvider";
-import PageTransition from "@/components/providers/PageTransition";
+import { ClientLayout } from "@/components/layout/ClientLayout";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -37,13 +35,9 @@ export default function RootLayout({
         <LangProvider>
           <ToastProvider>
             <AuthProvider>
-              <Navbar />
-              <main className="flex-1 pt-16">
-                <PageTransition>
-                  {children}
-                </PageTransition>
-              </main>
-              <Chatbot />
+              <ClientLayout>
+                {children}
+              </ClientLayout>
             </AuthProvider>
           </ToastProvider>
         </LangProvider>

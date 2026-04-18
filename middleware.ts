@@ -28,10 +28,6 @@ export default withAuth(
       );
     }
 
-    if (isAdminRoute && token?.role !== "ADMIN") {
-      return NextResponse.redirect(new URL("/dashboard", req.url));
-    }
-
     return null;
   },
   {

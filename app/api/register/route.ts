@@ -6,6 +6,18 @@ export async function POST(req: NextRequest) {
   try {
     const { name, email, password } = await req.json();
 
+    // Kiểm tra cấu hình hệ thống xem có cho phép đăng ký không
+    const config = await prisma.systemConfig.findUnique({
+      where: { id: "GLOBAL_CONFIG" }
+    });
+
+    if (config && !config.allowRegistration) {
+      return NextResponse.json(
+        { error: "Tính năng đăng ký hiện đang tạm khóa bởi quản trị viên." },
+        { status: 403 }
+      );
+    }
+
     if (!email || !password) {
       return NextResponse.json(
         { error: "Email and password are required" },
