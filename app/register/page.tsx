@@ -5,9 +5,11 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MoveRight, Mail, Lock, User, Loader2, Eye, EyeOff, Compass, CheckCircle2 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import confetti from "canvas-confetti";
 import { useLang } from "@/components/providers/LangProvider";
 import { AuthBackground } from "@/components/ui/AuthBackground";
 import { useToast } from "@/components/providers/ToastProvider";
+import { validateEmail } from "@/lib/validation";
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -15,11 +17,22 @@ export default function RegisterPage() {
   const authT = t.auth;
   const [formData, setFormData] = useState({ name: "", email: "", password: "", confirmPassword: "" });
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const { showToast } = useToast();
+  const [emailValidation, setEmailValidation] = useState<{ isValid: boolean; error?: string; suggestion?: string } | null>(null);
+
+  const handleEmailChange = (val: string) => {
+    setFormData({ ...formData, email: val });
+    if (val) {
+      setEmailValidation(validateEmail(val));
+    } else {
+      setEmailValidation(null);
+    }
+  };
 
 
 
@@ -30,6 +43,13 @@ export default function RegisterPage() {
 
     if (formData.password.length < 6) {
       showToast(authT.errLength, "error");
+      setIsLoading(false);
+      return;
+    }
+
+    const emailCheck = validateEmail(formData.email);
+    if (!emailCheck.isValid) {
+      showToast(emailCheck.error || "Email không hợp lệ", "error");
       setIsLoading(false);
       return;
     }
@@ -60,10 +80,16 @@ export default function RegisterPage() {
       }
 
       setIsSuccess(true);
-      showToast(authT.successMsg, "success");
+      confetti({
+        particleCount: 150,
+        spread: 70,
+        origin: { y: 0.6 },
+        colors: ["#0891b2", "#10b981", "#ffffff"]
+      });
+      showToast("Đăng ký thành công! Đang gửi mã xác thực...", "success");
       setTimeout(() => {
-        router.push("/login?registered=true");
-      }, 1000);
+        router.push(`/register/verify?email=${encodeURIComponent(formData.email)}`);
+      }, 1500);
     } catch (err: any) {
       showToast(err.message, "error");
       setIsLoading(false);
@@ -143,56 +169,126 @@ export default function RegisterPage() {
                 />
               </div>
 
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
+              <div>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Mail className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
+                  </div>
+                  <input
+                    type="email"
+                    required
+                    value={formData.email}
+                    onChange={(e) => handleEmailChange(e.target.value)}
+                    autoComplete="email"
+                    className={`block w-full pl-10 pr-3 py-2 border rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none sm:text-sm transition-all shadow-inner ${
+                      emailValidation && !emailValidation.isValid 
+                        ? "border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500" 
+                        : "border-gray-800 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                    }`}
+                    placeholder={authT.emailPlaceholder}
+                  />
                 </div>
-                <input
-                  type="email"
-                  required
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  autoComplete="email"
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={authT.emailPlaceholder}
-                />
+                <AnimatePresence>
+                  {emailValidation && !emailValidation.isValid && (
+                    <motion.p
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="text-red-400 text-xs ml-1 mt-1.5 font-medium flex flex-wrap gap-1 items-baseline"
+                    >
+                      <span>{emailValidation.error}</span>
+                      {emailValidation.suggestion && (
+                        <button 
+                          type="button"
+                          onClick={() => handleEmailChange(formData.email.split('@')[0] + '@' + emailValidation.suggestion)}
+                          className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 decoration-cyan-400/30"
+                        >
+                          Bạn muốn nhập @{emailValidation.suggestion}?
+                        </button>
+                      )}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
               </div>
 
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
+              <div>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
+                  </div>
+                  <input
+                    type={showPassword ? "text" : "password"}
+                    required
+                    value={formData.password}
+                    onChange={(e) => setFormData({ ...formData, password: e.target.value })}
+                    autoComplete="new-password"
+                    className={`block w-full pl-10 pr-10 py-2 border rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none sm:text-sm transition-all shadow-inner ${
+                      formData.password.length > 0 && formData.password.length < 6
+                        ? "border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                        : "border-gray-800 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                    }`}
+                    placeholder={authT.pwdPlaceholder}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-cyan-400 transition-colors focus:outline-none"
+                  >
+                    {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  value={formData.password}
-                  onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                  autoComplete="new-password"
-                  className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={authT.pwdPlaceholder}
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-cyan-400 transition-colors focus:outline-none"
-                >
-                  {showPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
-                </button>
+                <AnimatePresence>
+                  {formData.password.length > 0 && formData.password.length < 6 && (
+                    <motion.p
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="text-red-400 text-xs ml-1 mt-1.5 font-medium"
+                    >
+                      {authT.errLength}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
               </div>
 
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Lock className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors opacity-70" />
+              <div>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Lock className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors opacity-70" />
+                  </div>
+                  <input
+                    type={showConfirmPassword ? "text" : "password"}
+                    required
+                    value={formData.confirmPassword}
+                    onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
+                    autoComplete="new-password"
+                    className={`block w-full pl-10 pr-10 py-2 border rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none sm:text-sm transition-all shadow-inner ${
+                      formData.confirmPassword.length > 0 && formData.confirmPassword !== formData.password
+                        ? "border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500"
+                        : "border-gray-800 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                    }`}
+                    placeholder={authT.pwdConfirmPlaceholder}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowConfirmPassword(!showConfirmPassword)}
+                    className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-500 hover:text-cyan-400 transition-colors focus:outline-none"
+                  >
+                    {showConfirmPassword ? <EyeOff className="h-5 w-5" /> : <Eye className="h-5 w-5" />}
+                  </button>
                 </div>
-                <input
-                  type={showPassword ? "text" : "password"}
-                  required
-                  value={formData.confirmPassword}
-                  onChange={(e) => setFormData({ ...formData, confirmPassword: e.target.value })}
-                  autoComplete="new-password"
-                  className="block w-full pl-10 pr-10 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={authT.pwdConfirmPlaceholder}
-                />
+                <AnimatePresence>
+                  {formData.confirmPassword.length > 0 && formData.confirmPassword !== formData.password && (
+                    <motion.p
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="text-red-400 text-xs ml-1 mt-1.5 font-medium"
+                    >
+                      {authT.errMatch}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
               </div>
             </div>
 

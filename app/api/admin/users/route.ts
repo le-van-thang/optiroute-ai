@@ -75,3 +75,55 @@ export async function PATCH(req: Request) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }
+
+// Xóa tài khoản người dùng
+export async function DELETE(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id || session.user.role !== "ADMIN") {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 403 });
+    }
+
+    const { userId, reason } = await req.json();
+
+    if (!userId || !reason) return NextResponse.json({ error: "Missing data (userId/reason)" }, { status: 400 });
+    
+    if (userId === session.user.id) {
+       return NextResponse.json({ error: "Cannot delete yourself" }, { status: 400 });
+    }
+
+    const targetUser = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { email: true, role: true }
+    });
+
+    if (!targetUser) return NextResponse.json({ error: "User not found" }, { status: 404 });
+    if (targetUser.role === "ADMIN") {
+       return NextResponse.json({ error: "Cannot delete another administrator" }, { status: 400 });
+    }
+
+    // Ghi lại lý do xóa trước khi xóa vĩnh viễn user
+    await prisma.deletedAccountRecord.upsert({
+      where: { email: targetUser.email },
+      update: {
+        reason,
+        adminName: session.user.name || "Admin",
+        deletedAt: new Date()
+      },
+      create: {
+        email: targetUser.email,
+        reason,
+        adminName: session.user.name || "Admin"
+      }
+    });
+
+    // Xóa vĩnh viễn user
+    await prisma.user.delete({
+      where: { id: userId }
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}

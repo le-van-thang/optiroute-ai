@@ -2,9 +2,9 @@
 
 import React, { createContext, useContext, useState, useCallback, ReactNode } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { CheckCircle2, AlertCircle, Info, X } from "lucide-react";
+import { CheckCircle2, AlertCircle, Info, X, AlertTriangle } from "lucide-react";
 
-type ToastType = "success" | "error" | "info";
+type ToastType = "success" | "error" | "info" | "warning";
 
 interface Toast {
   id: string;
@@ -52,13 +52,17 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
                 ${toast.type === "success" ? "border-emerald-500/20" : ""}
                 ${toast.type === "error" ? "border-rose-500/20" : ""}
                 ${toast.type === "info" ? "border-indigo-500/20" : ""}
+                ${toast.type === "warning" ? "border-amber-500/20" : ""}
               `}>
                 <div className={`p-2 rounded-xl flex-shrink-0 ${
                   toast.type === "success" ? "bg-emerald-500/10 text-emerald-400" : 
-                  toast.type === "error" ? "bg-rose-500/10 text-rose-400" : "bg-indigo-500/10 text-indigo-400"
+                  toast.type === "error" ? "bg-rose-500/10 text-rose-400" : 
+                  toast.type === "warning" ? "bg-amber-500/10 text-amber-400" :
+                  "bg-indigo-500/10 text-indigo-400"
                 }`}>
                   {toast.type === "success" && <CheckCircle2 className="w-5 h-5" />}
                   {toast.type === "error" && <AlertCircle className="w-5 h-5" />}
+                  {toast.type === "warning" && <AlertTriangle className="w-5 h-5" />}
                   {toast.type === "info" && <Info className="w-5 h-5" />}
                 </div>
                 
@@ -79,7 +83,10 @@ export const ToastProvider = ({ children }: { children: ReactNode }) => {
                   animate={{ width: "0%" }}
                   transition={{ duration: 4.5, ease: "linear" }}
                   className={`absolute bottom-0 left-0 h-1 ${
-                    toast.type === 'success' ? 'bg-emerald-500' : toast.type === 'error' ? 'bg-rose-500' : 'bg-indigo-500'
+                    toast.type === 'success' ? 'bg-emerald-500' : 
+                    toast.type === 'error' ? 'bg-rose-500' : 
+                    toast.type === 'warning' ? 'bg-amber-500' :
+                    'bg-indigo-500'
                   }`}
                 />
               </div>

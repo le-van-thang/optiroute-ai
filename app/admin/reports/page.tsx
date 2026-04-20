@@ -7,23 +7,35 @@ import {
   Loader2, ExternalLink
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useRouter } from "next/navigation";
 
 interface ReportData {
   id: string;
   reason: string;
   content: string | null;
+  proofImage: string | null;
   status: "PENDING" | "RESOLVED" | "DISMISSED";
   createdAt: string;
-  reporter: { name: string; email: string };
-  reported: { name: string; email: string };
+  reporter: { id: string; name: string; email: string };
+  reported: { id: string; name: string; email: string };
   conversationId: string | null;
 }
+
+const REASON_LABELS: Record<string, string> = {
+  SPAM: "Làm phiền / Spam",
+  HARASSMENT: "Quấy rối / Đe dọa",
+  SCAM: "Lừa đảo / Chiếm đoạt",
+  INAPPROPRIATE: "Nội dung phản cảm",
+  OTHER: "Lý do khác"
+};
 
 export default function AdminReports() {
   const [reports, setReports] = useState<ReportData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"PENDING" | "ALL">("PENDING");
   const [isProcessing, setIsProcessing] = useState<string | null>(null);
+  const [viewProofImage, setViewProofImage] = useState<string | null>(null);
+  const router = useRouter();
 
   const fetchReports = async () => {
     setIsLoading(true);
@@ -57,6 +69,24 @@ export default function AdminReports() {
 
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
+      
+      {/* Proof Viewer Lightbox */}
+      <AnimatePresence>
+         {viewProofImage && (
+            <motion.div 
+               initial={{ opacity: 0 }}
+               animate={{ opacity: 1 }}
+               exit={{ opacity: 0 }}
+               onClick={() => setViewProofImage(null)}
+               className="fixed inset-0 z-50 bg-black/95 backdrop-blur-3xl flex items-center justify-center p-4"
+            >
+               <button onClick={() => setViewProofImage(null)} className="absolute top-8 right-8 text-white hover:text-red-500 transition-colors p-2 bg-white/5 rounded-full">
+                  <XCircle className="w-8 h-8" />
+               </button>
+               <img src={viewProofImage} alt="Report Evidence" className="max-w-full max-h-[90vh] object-contain rounded-2xl shadow-2xl border border-white/10" />
+            </motion.div>
+         )}
+      </AnimatePresence>
       
       {/* Header & Tabs */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
@@ -103,7 +133,7 @@ export default function AdminReports() {
                       </div>
                       <div>
                         <span className="text-[10px] font-black uppercase text-orange-400 tracking-widest leading-none mb-1 block">Yêu cầu xử lý</span>
-                        <h4 className="text-sm font-black text-white uppercase">{report.reason}</h4>
+                        <h4 className="text-sm font-black text-white uppercase">{REASON_LABELS[report.reason] || report.reason}</h4>
                       </div>
                    </div>
                    <span className="text-[9px] font-bold text-slate-500 bg-black/40 px-2 py-1 rounded-full uppercase flex items-center gap-1.5 border border-white/5">
@@ -114,22 +144,53 @@ export default function AdminReports() {
                 
                 <div className="space-y-4 mb-8">
                    <div className="p-4 bg-black/40 rounded-2xl border border-white/5">
-                      <p className="text-[10px] font-black uppercase text-slate-500 mb-2 px-1">Nội dung báo cáo</p>
-                      <p className="text-xs text-slate-200 leading-relaxed font-medium italic">"{report.content || "Người dùng không để lại tin nhắn chi tiết."}"</p>
+                      <p className="text-[10px] font-black uppercase text-slate-500 mb-2 px-1 hover:text-white transition-colors flex justify-between">
+                         Nội dung báo cáo
+                         {report.proofImage && (
+                            <button onClick={() => setViewProofImage(report.proofImage)} className="text-orange-500 hover:text-orange-400 flex items-center gap-1 bg-orange-500/10 px-2 py-0.5 rounded-full">
+                               <ExternalLink className="w-3 h-3" /> Xem bằng chứng
+                            </button>
+                         )}
+                      </p>
+                       <p className="text-xs text-slate-200 leading-relaxed font-medium italic">
+                          {report.content ? (
+                             `"${report.content}"`
+                          ) : (
+                             <span className="text-slate-500 italic">Người dùng đã báo cáo với lý do "{REASON_LABELS[report.reason] || report.reason}" mà không kèm mô tả thêm.</span>
+                          )}
+                       </p>
                    </div>
                    
                    <div className="grid grid-cols-2 gap-4">
-                      <div className="p-3.5 bg-white/[0.02] rounded-2xl border border-white/5 border-dashed">
+                      <div className="p-3.5 bg-white/[0.02] rounded-2xl border border-white/5 border-dashed relative group overflow-hidden hover:border-indigo-500/30 transition-colors">
                          <p className="text-[9px] font-black uppercase text-indigo-400/70 mb-1.5">Người báo cáo</p>
-                         <p className="text-xs font-black text-white truncate">{report.reporter.name}</p>
-                         <p className="text-[8px] text-slate-500 font-bold truncate">{report.reporter.email}</p>
+                         <p className="text-xs font-black text-white truncate z-10 relative">{report.reporter.name}</p>
+                         <p className="text-[8px] text-slate-500 font-bold truncate z-10 relative">{report.reporter.email}</p>
+                         <div className="absolute opacity-0 group-hover:opacity-100 inset-0 z-20 bg-indigo-600/90 flex items-center justify-center transition-all cursor-pointer"
+                           onClick={() => router.push(`/admin/users?search=${report.reporter.email}`)}
+                         >
+                            <span className="text-[10px] font-black text-white uppercase tracking-wider">Kiểm tra</span>
+                         </div>
                       </div>
-                      <div className="p-3.5 bg-white/[0.02] rounded-2xl border border-white/5 border-dashed">
-                         <p className="text-[9px] font-black uppercase text-red-400/70 mb-1.5">Người bị báo cáo</p>
-                         <p className="text-xs font-black text-white truncate">{report.reported.name}</p>
-                         <p className="text-[8px] text-slate-500 font-bold truncate">{report.reported.email}</p>
+                      <div className="p-3.5 bg-red-500/[0.02] rounded-2xl border border-red-500/10 border-dashed relative group overflow-hidden hover:border-red-500/30 transition-colors">
+                         <p className="text-[9px] font-black uppercase text-red-400/70 mb-1.5 flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> Kẻ vi phạm</p>
+                         <p className="text-xs font-black text-white truncate z-10 relative">{report.reported.name}</p>
+                         <p className="text-[8px] text-slate-500 font-bold truncate z-10 relative">{report.reported.email}</p>
+                         <div className="absolute opacity-0 group-hover:opacity-100 inset-0 z-20 bg-red-600/90 flex items-center justify-center transition-all cursor-pointer"
+                           onClick={() => router.push(`/admin/users?search=${report.reported.email}`)}
+                         >
+                            <span className="text-[10px] font-black text-white uppercase tracking-wider">Cấm ngay</span>
+                         </div>
                       </div>
                    </div>
+                   
+                   {report.conversationId && (
+                      <div className="pt-2">
+                         <a href={`/admin/reports/trace/${report.conversationId}`} className="block w-full text-center py-2 bg-white/5 hover:bg-white/10 text-white/70 hover:text-white rounded-xl text-[10px] font-black uppercase tracking-widest border border-white/5 transition-all">
+                            🔍 Truy vết hội thoại Chat
+                         </a>
+                      </div>
+                   )}
                 </div>
               </div>
 

@@ -43,6 +43,7 @@ export async function GET(req: Request) {
         image: true,
         role: true,
         acceptMessages: true,
+        lastActiveAt: true,
         sentRequests: {
           where: { receiver: { email: session.user.email } },
           select: { status: true, id: true },
@@ -69,6 +70,8 @@ export async function GET(req: Request) {
         friendStatus = "OUTGOING";
       }
 
+      let friendRequestId = incoming?.id || outgoing?.id || null;
+
       return {
         id: u.id,
         name: u.name,
@@ -76,7 +79,9 @@ export async function GET(req: Request) {
         image: u.image,
         role: u.role,
         acceptMessages: u.acceptMessages,
+        lastActiveAt: u.lastActiveAt,
         friendStatus,
+        friendRequestId,
       };
     });
 

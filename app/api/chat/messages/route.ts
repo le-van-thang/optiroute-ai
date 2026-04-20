@@ -118,17 +118,17 @@ export async function GET(req: Request) {
 
     if (!conversation) return NextResponse.json([]);
 
-    // Lọc tin nhắn dựa trên clearedAt của người dùng hiện tại
+    // Lọc tin nhắn dựa trên clearedAt của người dùng hiện tại và trạng thái deletedFor
     const clearedAtData = conversation.clearedAt as Record<string, string> || {};
     const userClearedAt = clearedAtData[session.user.id];
+    let visibleMessages = conversation.messages.filter((m: any) => !m.deletedFor?.includes(session.user.id));
 
     if (userClearedAt) {
       const clearDate = new Date(userClearedAt);
-      const visibleMessages = conversation.messages.filter(m => new Date(m.createdAt) > clearDate);
-      return NextResponse.json(visibleMessages);
+      visibleMessages = visibleMessages.filter(m => new Date(m.createdAt) > clearDate);
     }
 
-    return NextResponse.json(conversation.messages);
+    return NextResponse.json(visibleMessages);
   } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }

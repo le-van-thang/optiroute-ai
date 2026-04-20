@@ -4,9 +4,12 @@ import { useEffect, useState } from "react";
 import { 
   Users, Search, Shield, User as UserIcon, 
   Map as TripIcon, AlertCircle, MoreHorizontal, 
-  CheckCircle2, XCircle, Loader2
+  CheckCircle2, XCircle, Loader2, Ban, Clock, Calendar, Check, X
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { useSearchParams } from "next/navigation";
+import { useSession } from "next-auth/react";
+import { useToast } from "@/components/providers/ToastProvider";
 
 interface UserData {
   id: string;
@@ -22,10 +25,20 @@ interface UserData {
 }
 
 export default function AdminUsers() {
+  const { data: session } = useSession();
   const [users, setUsers] = useState<UserData[]>([]);
-  const [searchQuery, setSearchQuery] = useState("");
+  const searchParams = useSearchParams();
+  const [searchQuery, setSearchQuery] = useState(searchParams.get("search") || "");
   const [isLoading, setIsLoading] = useState(true);
   const [isUpdating, setIsUpdating] = useState<string | null>(null);
+  const [banningUser, setBanningUser] = useState<UserData | null>(null);
+  const [banDuration, setBanDuration] = useState("3_DAYS");
+  const [banReason, setBanReason] = useState("");
+  const [isBanning, setIsBanning] = useState(false);
+  const [deletingUser, setDeletingUser] = useState<UserData | null>(null);
+  const [deleteReason, setDeleteReason] = useState("");
+  const [isDeleting, setIsDeleting] = useState(false);
+  const { showToast } = useToast();
 
   const fetchUsers = async (q: string = "") => {
     setIsLoading(true);
@@ -38,7 +51,7 @@ export default function AdminUsers() {
   };
 
   useEffect(() => {
-    fetchUsers();
+    fetchUsers(searchQuery);
   }, []);
 
   const toggleRole = async (userId: string, currentRole: string) => {
@@ -56,9 +69,194 @@ export default function AdminUsers() {
     }
   };
 
+  const handleBanUser = async () => {
+    if (!banningUser || !banReason.trim()) return;
+    setIsBanning(true);
+    try {
+      const res = await fetch("/api/admin/users/ban", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: banningUser.id, type: banDuration, reason: banReason })
+      });
+      if (res.ok) {
+        setBanningUser(null);
+        setBanReason("");
+        setBanDuration("3_DAYS");
+        fetchUsers(searchQuery);
+        showToast("Khóa tài khoản thành công!", "success");
+      } else {
+        const data = await res.json();
+        showToast(data.error || "Có lỗi xảy ra khi khóa tài khoản.", "error");
+      }
+    } finally {
+      setIsBanning(false);
+    }
+  };
+
+  const handleDeleteAccount = async () => {
+    if (!deletingUser || !deleteReason.trim()) return;
+    setIsDeleting(true);
+    try {
+      const res = await fetch("/api/admin/users", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId: deletingUser.id, reason: deleteReason })
+      });
+      if (res.ok) {
+        setUsers(users.filter(u => u.id !== deletingUser.id));
+        setDeletingUser(null);
+        setDeleteReason("");
+        showToast("Xóa tài khoản vĩnh viễn thành công!", "success");
+      } else {
+        const data = await res.json();
+        showToast(data.error || "Có lỗi xảy ra khi xóa tài khoản.", "error");
+      }
+    } finally {
+      setIsDeleting(false);
+    }
+  };
+
   return (
     <div className="space-y-8 animate-in fade-in duration-500">
       
+      <AnimatePresence>
+        {deletingUser && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-red-950/20 backdrop-blur-md flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-md bg-slate-900 border-2 border-red-500/20 rounded-[32px] p-8 shadow-2xl relative"
+            >
+              <div className="flex flex-col items-center text-center">
+                 <div className="w-20 h-20 rounded-full bg-red-500/10 border border-red-500/20 flex items-center justify-center mb-6">
+                    <XCircle className="w-10 h-10 text-red-500" />
+                 </div>
+                 
+                 <h3 className="text-2xl font-black text-white uppercase tracking-tight mb-2">Xóa Vĩnh Viễn</h3>
+                 <p className="text-slate-400 font-medium text-sm mb-8">
+                    Hành động này sẽ xóa hoàn toàn tài khoản <span className="text-white font-black">{deletingUser.name}</span> và mọi dữ liệu liên quan. <span className="text-red-400 font-bold italic">Không thể hoàn tác!</span>
+                 </p>
+
+                 <div className="w-full space-y-4 mb-8">
+                   <div className="text-left">
+                     <label className="text-[10px] font-black uppercase tracking-widest text-slate-500 ml-1">Lý do xóa vĩnh viễn (BẮT BUỘC)</label>
+                     <textarea 
+                        className="w-full h-24 bg-red-500/5 border border-red-500/10 rounded-2xl p-4 text-sm mt-2 focus:outline-none focus:border-red-500 transition-all resize-none text-white font-bold"
+                        placeholder="Nhập lý do tại đây..."
+                        value={deleteReason}
+                        onChange={(e) => setDeleteReason(e.target.value)}
+                     />
+                   </div>
+                 </div>
+
+                 <div className="grid grid-cols-2 gap-4 w-full">
+                    <button 
+                       onClick={() => setDeletingUser(null)}
+                       disabled={isDeleting}
+                       className="py-4 bg-slate-800 text-white rounded-2xl font-black uppercase tracking-wider text-xs hover:bg-slate-700 transition-all"
+                    >
+                       Hủy bỏ
+                    </button>
+                    <button 
+                       onClick={handleDeleteAccount}
+                       disabled={isDeleting || !deleteReason.trim()}
+                       className="py-4 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl font-black uppercase tracking-wider text-xs transition-all shadow-xl shadow-red-600/30 flex items-center justify-center gap-2"
+                    >
+                       {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : "XÓA NGAY"}
+                    </button>
+                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+        {banningUser && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="w-full max-w-lg bg-slate-900 border border-white/10 rounded-[32px] p-8 shadow-2xl relative"
+            >
+              <button 
+                onClick={() => setBanningUser(null)}
+                className="absolute top-6 right-6 p-2 rounded-full bg-white/5 hover:bg-white/10 text-white/50 hover:text-white transition-all"
+              >
+                <X className="w-5 h-5" />
+              </button>
+              
+              <div className="flex items-center gap-4 mb-8">
+                 <div className="w-14 h-14 rounded-2xl bg-red-500/10 border border-red-500/20 flex items-center justify-center">
+                    <Ban className="w-7 h-7 text-red-500" />
+                 </div>
+                 <div>
+                   <h3 className="text-xl font-black text-white uppercase tracking-tight">Kỷ luật tài khoản</h3>
+                   <p className="text-red-400 font-medium text-sm">Khóa truy cập của {banningUser.name}</p>
+                 </div>
+              </div>
+
+              <div className="space-y-6">
+                 <div className="space-y-3">
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Thời hạn cấm</label>
+                   <div className="grid grid-cols-2 gap-3">
+                     {[
+                       { id: "3_DAYS", label: "3 Ngày", icon: Clock },
+                       { id: "1_WEEK", label: "1 Tuần", icon: Calendar },
+                       { id: "1_MONTH", label: "1 Tháng", icon: Calendar },
+                       { id: "1_YEAR", label: "1 Năm", icon: Calendar },
+                       { id: "PERMANENT", label: "Vĩnh Viễn", icon: AlertCircle }
+                     ].map(t => (
+                       <button
+                         key={t.id}
+                         onClick={() => setBanDuration(t.id)}
+                         className={`flex items-center gap-3 p-3 rounded-xl border transition-all col-span-1 ${t.id === 'PERMANENT' ? 'col-span-2' : ''} ${banDuration === t.id ? 'bg-red-500/10 border-red-500/50 text-red-400' : 'bg-slate-800/50 border-white/5 text-slate-400 hover:bg-white/5'}`}
+                       >
+                         <t.icon className="w-4 h-4" />
+                         <span className="font-bold text-sm uppercase">{t.label}</span>
+                         {banDuration === t.id && <Check className="w-4 h-4 ml-auto" />}
+                       </button>
+                     ))}
+                   </div>
+                 </div>
+
+                 <div className="space-y-3">
+                   <label className="text-[10px] font-black uppercase tracking-widest text-slate-500">Lý do cấm (Người dùng sẽ nhìn thấy)</label>
+                   <textarea 
+                     className="w-full h-24 bg-slate-800/50 border border-white/5 rounded-xl p-4 text-sm focus:outline-none focus:border-red-500 transition-all resize-none text-white font-medium"
+                     placeholder="Ví dụ: Lừa đảo tiền hóa đơn Split-bill..."
+                     value={banReason}
+                     onChange={(e) => setBanReason(e.target.value)}
+                   />
+                 </div>
+
+                 <div className="flex gap-4 pt-4">
+                    <button onClick={() => setBanningUser(null)} className="flex-1 py-4 bg-slate-800 text-white rounded-2xl font-bold uppercase tracking-wider text-sm hover:bg-slate-700 transition-all">
+                       Hủy
+                    </button>
+                    <button 
+                      onClick={handleBanUser} 
+                      disabled={isBanning || !banReason.trim()}
+                      className="flex-1 py-4 flex items-center justify-center gap-2 bg-red-600 hover:bg-red-500 disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-2xl font-bold uppercase tracking-wider text-sm transition-all shadow-lg shadow-red-600/20"
+                    >
+                       {isBanning ? <Loader2 className="w-5 h-5 animate-spin" /> : "Ban Người Dùng"}
+                    </button>
+                 </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Header & Search */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
@@ -161,13 +359,28 @@ export default function AdminUsers() {
                        <div className="flex items-center justify-end gap-2">
                           <button 
                             onClick={() => toggleRole(user.id, user.role)}
-                            disabled={isUpdating === user.id}
-                            className={`p-2 rounded-xl transition-all border border-white/5 ${user.role === 'ADMIN' ? 'bg-slate-800 text-slate-400 hover:text-white' : 'bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600 hover:text-white'}`}
-                            title={user.role === 'ADMIN' ? "Hạ cấp xuống USER" : "Nâng cấp lên ADMIN"}
+                            disabled={isUpdating === user.id || session?.user?.id === user.id}
+                            className={`p-2 rounded-xl transition-all border border-white/5 ${session?.user?.id === user.id ? 'bg-slate-800 text-slate-500 cursor-not-allowed opacity-50' : (user.role === 'ADMIN' ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-600 hover:text-white' : 'bg-indigo-600/10 text-indigo-400 hover:bg-indigo-600 hover:text-white')}`}
+                            title={session?.user?.id === user.id ? "Không thể tự thay đổi quyền của chính mình" : (user.role === 'ADMIN' ? "Hạ cấp xuống USER" : "Nâng cấp lên ADMIN")}
                           >
-                            {isUpdating === user.id ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
+                            {isUpdating === user.id && isUpdating !== 'DELETE' ? <Loader2 className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
                           </button>
-                          <button className="p-2 rounded-xl bg-red-600/10 text-red-500 border border-red-500/10 hover:bg-red-600 hover:text-white transition-all">
+                          
+                          <button 
+                            onClick={() => setBanningUser(user)}
+                            disabled={isUpdating === user.id || session?.user?.id === user.id || user.role === 'ADMIN'}
+                            className={`p-2 rounded-xl border transition-all ${session?.user?.id === user.id || user.role === 'ADMIN' ? 'bg-slate-800 text-slate-500 border-white/5 cursor-not-allowed opacity-50' : 'bg-red-600/10 text-red-500 border-red-500/10 hover:bg-red-600 hover:text-white'}`}
+                            title={session?.user?.id === user.id ? "Bạn không thể khóa chính mình" : (user.role === 'ADMIN' ? "Hãy hạ cấp mục tiêu xuống USER trước" : "Xóa / Khóa tài khoản")}
+                          >
+                             <Ban className="w-4 h-4" />
+                          </button>
+                          
+                          <button 
+                            onClick={() => setDeletingUser(user)}
+                            disabled={isUpdating === user.id || session?.user?.id === user.id || user.role === 'ADMIN'}
+                            className={`p-2 rounded-xl transition-all border ${session?.user?.id === user.id || user.role === 'ADMIN' ? 'bg-slate-800 text-slate-500 border-white/5 cursor-not-allowed opacity-50' : 'bg-red-600/10 text-red-500 border-red-500/10 hover:bg-red-600 hover:text-white disabled:opacity-50'}`}
+                            title={session?.user?.id === user.id ? "Không thể xóa chính mình" : (user.role === 'ADMIN' ? "Hãy hạ cấp mục tiêu xuống USER trước" : "Xóa tài khoản vĩnh viễn")}
+                          >
                              <XCircle className="w-4 h-4" />
                           </button>
                        </div>

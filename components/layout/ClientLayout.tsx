@@ -5,6 +5,7 @@ import { Navbar } from "@/components/layout/Navbar";
 import { Chatbot } from "@/components/ui/Chatbot";
 import PageTransition from "@/components/providers/PageTransition";
 import { MaintenanceWrapper } from "@/components/providers/MaintenanceWrapper";
+import { NavProgress } from "@/components/ui/NavProgress";
 
 export function ClientLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -16,6 +17,7 @@ export function ClientLayout({ children }: { children: React.ReactNode }) {
 
   return (
     <>
+      <NavProgress />
       {!hideMainUI && <Navbar />}
       <MaintenanceWrapper adminRole="ADMIN">
         <main className={`flex-1 ${hideMainUI ? "" : "pt-16"}`}>

@@ -30,6 +30,8 @@ model User {
   twoFactorEnabled  Boolean         @default(false)
   twoFactorMethod   String?         @default("EMAIL")
   role              Role           @default(USER)
+  emailVerified     Boolean         @default(false)
+  emailVerifiedAt   DateTime?
   createdAt         DateTime        @default(now())
   updatedAt         DateTime        @updatedAt
   travelDNA         Json?
@@ -52,6 +54,7 @@ model User {
   points            Int             @default(500)
   inventory         Json?           @default("[]")
   lastActiveTripId  String?
+  lastActiveAt      DateTime        @default(now())
 
   // Phase 24: Real 2FA (Real Email/SMS)
   verificationCode  String?
@@ -69,8 +72,21 @@ model User {
   reportsSent       Report[]       @relation("Reporter")
   reportsReceived   Report[]       @relation("Reported")
 
+  // Ban System
+  bannedUntil       DateTime?
+  banReason         String?
+
   // Privilege & Privacy Settings
-  acceptMessages    Boolean         @default(true)
+  acceptMessages     Boolean         @default(true)
+  profileVisibility  String          @default("PUBLIC") 
+
+  // Notification Settings
+  emailNotifications Boolean         @default(true)
+  pushNotifications  Boolean         @default(true)
+
+  // Forgot Password
+  resetToken        String?         @unique
+  resetTokenExpires DateTime?
 }
 
 model Place {
@@ -232,6 +248,9 @@ model Message {
   replyToId      String?
   replyTo        Message?     @relation("MessageReplies", fields: [replyToId], references: [id])
   replies        Message[]    @relation("MessageReplies")
+  
+  // Deletion tracking
+  deletedFor     String[]     @default([])
 }
 
 model Block {
@@ -254,6 +273,7 @@ model Report {
   conversationId String?
   reason         String
   content        String?
+  proofImage     String?
   status         String   @default("PENDING") // PENDING, RESOLVED, DISMISSED
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
@@ -266,4 +286,12 @@ model SystemConfig {
   supportEmail       String?  @default("support@optiroute.ai")
   adminNotifications Boolean  @default(true)
   updatedAt          DateTime @updatedAt
+}
+
+model DeletedAccountRecord {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  reason    String
+  adminName String?
+  deletedAt DateTime @default(now())
 }

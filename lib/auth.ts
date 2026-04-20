@@ -10,6 +10,13 @@ export const authOptions: NextAuthOptions = {
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID || "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET || "",
+      authorization: {
+        params: {
+          prompt: "select_account",
+          access_type: "offline",
+          response_type: "code"
+        }
+      }
     }),
     FacebookProvider({
       clientId: process.env.FACEBOOK_CLIENT_ID || "",
@@ -32,8 +39,20 @@ export const authOptions: NextAuthOptions = {
           }
         });
 
-        if (!user || !user.passwordHash) {
+        if (!user) {
           throw new Error("Invalid credentials");
+        }
+
+        if (!user.passwordHash) {
+          throw new Error("SOCIAL_LOGIN_ONLY");
+        }
+
+        if (user.bannedUntil && new Date(user.bannedUntil) > new Date()) {
+          throw new Error(`BANNED|${user.banReason || "Vi phạm tiêu chuẩn cộng đồng"}|${user.bannedUntil.getTime()}`);
+        }
+
+        if (!user.emailVerified) {
+          throw new Error("UNVERIFIED");
         }
 
         const isPasswordValid = await bcrypt.compare(credentials.password, user.passwordHash);
@@ -58,15 +77,39 @@ export const authOptions: NextAuthOptions = {
     async signIn({ user, account }) {
       if (account?.provider === "google" || account?.provider === "facebook") {
         if (!user.email) return false;
+        
+        // Phase 26: Chỉnh chu - Chặn đăng nhập bằng Google/FB nếu Email này đã bị Admin xóa vĩnh viễn trước đó
+        const userEmail = user?.email?.toLowerCase();
+        if (userEmail) {
+          const deletedRecord = await prisma.deletedAccountRecord.findUnique({
+            where: { email: userEmail }
+          });
+
+          if (deletedRecord) {
+            // Trả về URL redirect với mã lỗi đặc biệt
+            return `/login?error=DeletedAccount&reason=${encodeURIComponent(deletedRecord.reason)}`;
+          }
+        }
+
+        const existingUser = await prisma.user.findUnique({ where: { email: user.email }});
+        
+        if (existingUser && existingUser.bannedUntil && new Date(existingUser.bannedUntil) > new Date()) {
+          return `/login?error=Banned&reason=${encodeURIComponent(existingUser.banReason || "Vi phạm tiêu chuẩn cộng đồng")}&until=${existingUser.bannedUntil.getTime()}`;
+        }
+
         await prisma.user.upsert({
           where: { email: user.email },
           update: {
             name: user.name,
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
           },
           create: {
             email: user.email,
             name: user.name,
             passwordHash: "", // Social accounts don't use this
+            emailVerified: true,
+            emailVerifiedAt: new Date(),
           },
         });
       }
@@ -78,17 +121,23 @@ export const authOptions: NextAuthOptions = {
         token.role = (user as any).role;
       }
 
+      // Phase 26: Luôn đồng bộ ID thật và Role trực tiếp từ Database
+      // để loại bỏ lỗi Google trả về ID ảo (không khớp với UUID chuẩn)
+      if (token.email) {
+        const dbUser = await prisma.user.findUnique({ where: { email: token.email } });
+        if (dbUser) {
+          token.id = dbUser.id;
+          token.role = dbUser.role;
+          token.name = dbUser.name;
+          token.picture = dbUser.image;
+        }
+      }
+
       // Sync session updates (name, image) to the JWT token
       if (trigger === "update" && session) {
         if (session.user?.name) token.name = session.user.name;
         if (session.user?.image) token.picture = session.user.image;
         if (session.user?.role) token.role = session.user.role;
-      } else if (token.email && !token.id) {
-        // Fallback for social login persistence
-        const dbUser = await prisma.user.findUnique({ where: { email: token.email } });
-        if (dbUser) {
-          token.id = dbUser.id;
-        }
       }
       return token;
     },

@@ -79,6 +79,69 @@ export async function send2FAEmail(email: string, code: string) {
 }
 
 /**
+ * Gửi Email chứa mã xác thực tài khoản mới
+ */
+export async function sendVerificationEmail(email: string, code: string) {
+  const html = `
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px; background-color: #fcfcfc; border: 1px solid #eee; border-radius: 16px; color: #333;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #0891b2; margin: 0; font-size: 28px; letter-spacing: -0.5px;">OptiRoute AI</h1>
+        <p style="color: #666; font-size: 14px; margin-top: 5px;">Xác thực tài khoản của bạn</p>
+      </div>
+      
+      <div style="background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.03); text-align: center;">
+        <h2 style="color: #111; font-size: 20px; margin-top: 0;">Chào mừng bạn đến với OptiRoute!</h2>
+        <p style="line-height: 1.6; color: #555;">Cảm ơn bạn đã đăng ký. Vui lòng sử dụng mã OTP dưới đây để hoàn tất việc xác thực tài khoản:</p>
+        
+        <div style="background: #f0f9ff; padding: 24px; text-align: center; border-radius: 16px; margin: 24px 0; border: 1px dashed #bae6fd;">
+          <span style="font-size: 36px; font-weight: 900; letter-spacing: 0.3em; color: #0369a1;">${code}</span>
+        </div>
+        
+        <p style="font-size: 13px; color: #888; margin-top: 25px;">
+          Mã này sẽ hết hạn sau <strong>10 phút</strong>. Nếu bạn không thực hiện yêu cầu này, vui lòng bỏ qua email này.
+        </p>
+      </div>
+      
+      <div style="text-align: center; margin-top: 30px; font-size: 12px; color: #aaa;">
+        <p>&copy; 2026 OptiRoute AI. All rights reserved.</p>
+        <p>Đây là hệ thống tự động, vui lòng không phản hồi email này.</p>
+      </div>
+    </div>
+  `;
+
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+    try {
+      await transporter.sendMail({
+        from: `"OptiRoute AI" <${process.env.GMAIL_USER}>`,
+        to: email,
+        subject: `[OptiRoute] Mã xác thực tài khoản của bạn: ${code}`,
+        html: html,
+      });
+      return;
+    } catch (error) {
+      console.error("Lỗi gửi Email Verification qua Gmail:", error);
+    }
+  }
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      await resend.emails.send({
+        from: 'OptiRoute AI <hello@optiroute.ai>',
+        to: email,
+        subject: `[OptiRoute] Mã xác thực tài khoản của bạn: ${code}`,
+        html: html,
+      });
+      return;
+    } catch (error) {
+      console.error("Lỗi gửi Email Verification qua Resend:", error);
+    }
+  }
+
+  console.warn("⚠️ Chưa cấu hình Email. Mã OTP hiển thị tại đây:");
+  console.log(`[Verification OTP] To: ${email}, Code: ${code}`);
+}
+
+/**
  * Gửi SMS chứa mã xác thực (Sử dụng Twilio)
  */
 export async function send2FASMS(phone: string, code: string) {
@@ -100,3 +163,71 @@ export async function send2FASMS(phone: string, code: string) {
   }
 }
 
+
+/**
+ * Gửi Email khôi phục mật khẩu
+ */
+export async function sendResetPasswordEmail(email: string, token: string) {
+  const resetLink = `${process.env.NEXTAUTH_URL}/reset-password?token=${token}`;
+  
+  const html = `
+    <div style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; max-width: 600px; margin: 0 auto; padding: 40px; background-color: #fcfcfc; border: 1px solid #eee; border-radius: 16px; color: #333;">
+      <div style="text-align: center; margin-bottom: 30px;">
+        <h1 style="color: #0891b2; margin: 0; font-size: 28px; letter-spacing: -0.5px;">OptiRoute AI</h1>
+        <p style="color: #666; font-size: 14px; margin-top: 5px;">Hệ thống Lịch trình thông minh</p>
+      </div>
+      
+      <div style="background-color: #ffffff; padding: 30px; border-radius: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.03);">
+        <h2 style="color: #111; font-size: 20px; margin-top: 0;">Khôi phục mật khẩu</h2>
+        <p style="line-height: 1.6; color: #555;">Chào bạn,</p>
+        <p style="line-height: 1.6; color: #555;">Chúng tôi nhận được yêu cầu khôi phục mật khẩu cho tài khoản của bạn. Vui lòng nhấn vào nút bên dưới để thiết lập mật khẩu mới:</p>
+        
+        <div style="text-align: center; margin: 35px 0;">
+          <a href="${resetLink}" style="background-color: #0891b2; color: #ffffff; padding: 14px 32px; text-decoration: none; border-radius: 10px; font-weight: bold; font-size: 16px; display: inline-block; transition: background-color 0.3s ease;">
+            Thiết lập lại mật khẩu
+          </a>
+        </div>
+        
+        <p style="font-size: 13px; color: #888; margin-top: 25px;">
+          Đường dẫn này sẽ hết hạn sau <strong>1 giờ</strong>. Nếu bạn không thực hiện yêu cầu này, hãy bỏ qua email này, mật khẩu của bạn vẫn sẽ được giữ nguyên.
+        </p>
+      </div>
+      
+      <div style="text-align: center; margin-top: 30px; font-size: 12px; color: #aaa;">
+        <p>&copy; 2026 OptiRoute AI. All rights reserved.</p>
+        <p>Đây là hệ thống tự động, vui lòng không phản hồi email này.</p>
+      </div>
+    </div>
+  `;
+
+  if (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD) {
+    try {
+      await transporter.sendMail({
+        from: `"Hỗ trợ OptiRoute AI" <${process.env.GMAIL_USER}>`,
+        to: email,
+        subject: "[OptiRoute AI] Yêu cầu khôi phục mật khẩu",
+        html: html,
+      });
+      return;
+    } catch (error) {
+      console.error("Lỗi gửi Email Reset qua Gmail:", error);
+    }
+  }
+
+  if (process.env.RESEND_API_KEY) {
+    try {
+      await resend.emails.send({
+        from: 'OptiRoute AI <support@optiroute.ai>',
+        to: email,
+        subject: "[OptiRoute AI] Yêu cầu khôi phục mật khẩu",
+        html: html,
+      });
+      return;
+    } catch (error) {
+      console.error("Lỗi gửi Email Reset qua Resend:", error);
+    }
+  }
+
+  console.warn("⚠️ Chưa cấu hình Email. Reset Link hiển thị tại đây:");
+  console.log(`[Reset Password Link] To: ${email}, Link: ${resetLink}`);
+}

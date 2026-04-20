@@ -35,17 +35,19 @@ export function MaintenanceWrapper({ children, adminRole }: MaintenanceWrapperPr
     checkStatus();
   }, [pathname]);
 
-  if (isLoading && status === "loading") {
-    return (
-      <div className="flex-1 flex items-center justify-center bg-[#020617]">
-        <Loader2 className="w-8 h-8 text-indigo-500 animate-spin opacity-50" />
-      </div>
-    );
-  }
+  // Phase 26: Chỉnh chu - Loại bỏ màn hình chờ (Spinner) gây kẹt khi nhấn Back trình duyệt.
+  // Chúng ta sẽ cho phép trang render ngay lập tức và chỉ redirect nếu thực sự đang bảo trì.
+
 
   // Nếu đang bảo trì, và không phải Admin, và không phải trang bảo trì/home
   const isAdmin = session?.user?.role === adminRole;
-  const isExcludedPage = pathname === "/maintenance" || pathname === "/" || pathname.startsWith("/admin");
+  const isExcludedPage = 
+    pathname === "/maintenance" || 
+    pathname === "/" || 
+    pathname === "/login" || 
+    pathname === "/register" || 
+    pathname.startsWith("/api") ||
+    pathname.startsWith("/admin");
 
   if (isMaintenance && !isAdmin && !isExcludedPage) {
     router.push("/maintenance");

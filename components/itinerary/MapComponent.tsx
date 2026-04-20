@@ -27,8 +27,8 @@ interface MapProps {
 }
 
 const MAP_STYLE_URLS = [
-  { id: "dark", urlKey: "dark" as const, url: "mapbox://styles/mapbox/dark-v11" },
   { id: "streets", urlKey: "streets" as const, url: "mapbox://styles/mapbox/streets-v12" },
+  { id: "dark", urlKey: "dark" as const, url: "mapbox://styles/mapbox/dark-v11" },
   { id: "satellite", urlKey: "satellite" as const, url: "mapbox://styles/mapbox/satellite-streets-v12" },
 ];
 
