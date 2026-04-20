@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useSession } from "next-auth/react";
-import { motion } from "framer-motion";
 import { 
   Settings, User, Bell, Shield, Landmark, 
   Languages, Moon, Smartphone, HelpCircle, 
@@ -10,6 +9,11 @@ import {
 } from "lucide-react";
 import { useLang } from "@/components/providers/LangProvider";
 import { BankSettingsModal } from "@/components/split-bill/BankSettingsModal";
+import { ChangePasswordModal } from "@/components/settings/ChangePasswordModal";
+import { PrivacyModal } from "@/components/settings/PrivacyModal";
+import { NotificationsModal } from "@/components/settings/NotificationsModal";
+import { TransactionHistoryModal } from "@/components/settings/TransactionHistoryModal";
+import { useToast } from "@/components/providers/ToastProvider";
 import Link from "next/link";
 
 interface SettingsItem {
@@ -29,8 +33,14 @@ interface SettingsCategory {
 
 export default function SettingsPage() {
   const { data: session } = useSession();
-  const { lang, setLang, t } = useLang();
+  const { lang, setLang } = useLang();
+  const { showToast } = useToast();
+  
   const [showBankModal, setShowBankModal] = useState(false);
+  const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [showPrivacyModal, setShowPrivacyModal] = useState(false);
+  const [showNotificationModal, setShowNotificationModal] = useState(false);
+  const [showTransactionModal, setShowTransactionModal] = useState(false);
 
   const categories: SettingsCategory[] = [
     {
@@ -48,12 +58,14 @@ export default function SettingsPage() {
            icon: Lock, 
            label: "Mật khẩu", 
            desc: "Thay đổi mật khẩu đăng nhập",
+           action: () => setShowPasswordModal(true),
            color: "bg-purple-500"
         },
         { 
            icon: Shield, 
            label: "Quyền riêng tư", 
            desc: "Quản lý dữ liệu và bảo mật",
+           action: () => setShowPrivacyModal(true),
            color: "bg-blue-500"
         }
       ]
@@ -73,6 +85,7 @@ export default function SettingsPage() {
            icon: CreditCard, 
            label: "Lịch sử giao dịch", 
            desc: "Xem lại các khoản đã thanh toán",
+           action: () => setShowTransactionModal(true),
            color: "bg-amber-500"
         }
       ]
@@ -91,13 +104,15 @@ export default function SettingsPage() {
         { 
            icon: Moon, 
            label: "Giao diện", 
-           desc: "Chế độ tối (Luôn bật)",
+           desc: "Chế độ tối (Mặc định)",
+           action: () => showToast("OptiRoute AI hiển thị tốt nhất trên nền tối. Chế độ sáng đang được ẩn đi.", "info"),
            color: "bg-slate-700"
         },
         { 
            icon: Bell, 
            label: "Thông báo", 
            desc: "Cài đặt âm thanh và đẩy tin",
+           action: () => setShowNotificationModal(true),
            color: "bg-cyan-500"
         }
       ]
@@ -144,7 +159,7 @@ export default function SettingsPage() {
                   return (
                     <div key={index} className={index !== 0 ? "border-t border-white/5" : ""}>
                       {item.link ? (
-                        <Link href={item.link}>{Content}</Link>
+                        <Link href={item.link} className="block">{Content}</Link>
                       ) : (
                         <button className="w-full" onClick={item.action}>{Content}</button>
                       )}
@@ -179,6 +194,22 @@ export default function SettingsPage() {
       <BankSettingsModal 
         isOpen={showBankModal} 
         onClose={() => setShowBankModal(false)} 
+      />
+      <ChangePasswordModal 
+        isOpen={showPasswordModal}
+        onClose={() => setShowPasswordModal(false)}
+      />
+      <PrivacyModal 
+        isOpen={showPrivacyModal}
+        onClose={() => setShowPrivacyModal(false)}
+      />
+      <NotificationsModal 
+        isOpen={showNotificationModal}
+        onClose={() => setShowNotificationModal(false)}
+      />
+      <TransactionHistoryModal 
+        isOpen={showTransactionModal}
+        onClose={() => setShowTransactionModal(false)}
       />
     </div>
   );

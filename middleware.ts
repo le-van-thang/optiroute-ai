@@ -13,7 +13,16 @@ export default withAuth(
 
     if (isAuthPage) {
       if (isAuth) {
-        return NextResponse.redirect(new URL("/dashboard", req.url));
+        // Phase 26: Chỉnh chu - Nếu đang ở trang Login/Register mà có tham số lỗi (do bị Ban hoặc Xóa)
+        // thì KHÔNG tự động chuyển hướng vào Dashboard để User còn xem được thông báo.
+        const hasError = req.nextUrl.searchParams.has("error") || 
+                        req.nextUrl.searchParams.has("reason") || 
+                        req.nextUrl.searchParams.has("message") ||
+                        req.nextUrl.searchParams.has("banned");
+        
+        if (!hasError) {
+          return NextResponse.redirect(new URL("/dashboard", req.url));
+        }
       }
       return null;
     }

@@ -1,14 +1,15 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, signOut } from "next-auth/react";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { MoveRight, Mail, Lock, Loader2, Eye, EyeOff, MapPin, CheckCircle2 } from "lucide-react";
+import { MoveRight, Mail, Lock, Loader2, Eye, EyeOff, MapPin, CheckCircle2, AlertOctagon, Clock, XCircle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
 import { AuthBackground } from "@/components/ui/AuthBackground";
 import { useToast } from "@/components/providers/ToastProvider";
+import { validateEmail } from "@/lib/validation";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,13 +25,46 @@ export default function LoginPage() {
   const { showToast } = useToast();
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
   const [isFacebookLoading, setIsFacebookLoading] = useState(false);
+  const [emailValidation, setEmailValidation] = useState<{ isValid: boolean; error?: string; suggestion?: string } | null>(null);
+  const [deletedReason, setDeletedReason] = useState<string | null>(null);
+
+  const handleEmailChange = (val: string) => {
+    setFormData({ ...formData, email: val });
+    if (val) {
+      setEmailValidation(validateEmail(val));
+    } else {
+      setEmailValidation(null);
+    }
+  };
+
+  const [banInfo, setBanInfo] = useState<{ reason: string, until: number } | null>(null);
 
   useEffect(() => {
     if (searchParams?.get("registered") === "true") {
       setMessage(authT.regSuccess);
     }
-    if (searchParams?.get("error")) {
-      setError(authT.invalidMsg);
+    if (searchParams?.get("reset") === "true") {
+      setMessage(authT.resetSuccess);
+    }
+    
+    const err = searchParams?.get("error");
+    if (err) {
+      if (err.startsWith("BANNED|")) {
+        const parts = err.split("|");
+        setBanInfo({ reason: decodeURIComponent(parts[1]), until: parseInt(parts[2]) });
+      } else if (err === "Banned") {
+        const reason = searchParams?.get("reason");
+        const until = searchParams?.get("until");
+        setBanInfo({ 
+          reason: reason ? decodeURIComponent(reason) : "Vi phạm tiêu chuẩn cộng đồng", 
+          until: until ? parseInt(until) : Date.now() 
+        });
+      } else if (err === "DeletedAccount") {
+        const reason = searchParams?.get("reason");
+        setDeletedReason(reason ? decodeURIComponent(reason) : "Tài khoản của bạn đã bị xóa vĩnh viễn.");
+      } else {
+        setError(authT.invalidMsg);
+      }
     }
 
     // Pro-fix: Manually clear password on mount to defeat aggressive Chrome autofill
@@ -48,6 +82,13 @@ export default function LoginPage() {
     setError("");
     setMessage("");
 
+    const emailCheck = validateEmail(formData.email);
+    if (!emailCheck.isValid) {
+      showToast(emailCheck.error || "Email không hợp lệ", "error");
+      setIsLoading(false);
+      return;
+    }
+
     const res = await signIn("credentials", {
       redirect: false,
       email: formData.email,
@@ -56,7 +97,25 @@ export default function LoginPage() {
 
     if (res?.error) {
       setIsLoading(false);
-      showToast(authT.invalidMsg, "error");
+      if (res.error === "UNVERIFIED") {
+        showToast("Tài khoản chưa được xác thực. Hãy nhập mã OTP.", "warning");
+        setTimeout(() => {
+          router.push(`/register/verify?email=${encodeURIComponent(formData.email)}&resend=true`);
+        }, 1500);
+      } else if (res.error === "SOCIAL_LOGIN_ONLY") {
+        showToast("Tài khoản này được đăng ký thông qua mạng xã hội. Vui lòng bấm nút Google hoặc Facebook bên dưới để đăng nhập.", "info");
+      } else {
+        // Phase 26: Kiểm tra xem có phải bị xóa không nếu thông tin sai (vì User bị xóa DB nên signin fail)
+        try {
+          const checkRes = await fetch(`/api/register?email=${encodeURIComponent(formData.email.toLowerCase())}`);
+          const checkData = await checkRes.json();
+          if (checkData.isDeleted) {
+            setDeletedReason(checkData.reason);
+            return;
+          }
+        } catch (e) {}
+        showToast(authT.invalidMsg, "error");
+      }
     } else {
       setIsSuccess(true);
       showToast(authT.successMsg, "success");
@@ -82,7 +141,110 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="min-h-screen flex bg-[#020817] font-sans h-full">
+    <div className="min-h-screen flex bg-[#020817] font-sans h-full relative overflow-hidden">
+      
+      {/* Account Deleted Overlay Modal */}
+      <AnimatePresence>
+        {deletedReason && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[1000] bg-[#020817]/95 backdrop-blur-3xl flex items-center justify-center p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="max-w-md w-full bg-[#0a0000] border border-red-500/30 rounded-[32px] p-8 shadow-[0_0_100px_rgba(239,68,68,0.2)] text-center relative overflow-hidden"
+            >
+               <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6">
+                 <XCircle className="w-10 h-10 text-red-500" />
+               </div>
+               
+               <h2 className="text-2xl font-black text-white uppercase tracking-tight mb-2">Tài Khoản Đã Bị Xóa</h2>
+               <div className="bg-white/5 border border-white/5 rounded-2xl p-6 mb-8 text-left">
+                  <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Lý do từ Quản trị viên</p>
+                  <p className="text-sm font-bold text-red-400 italic">"{deletedReason}"</p>
+               </div>
+               
+               <p className="text-xs text-slate-400 mb-8">
+                  Dữ liệu của bạn đã được xóa hoàn toàn theo yêu cầu của Quản trị viên. Bạn không thể tiếp tục sử dụng Email này.
+               </p>
+               
+               <button 
+                 onClick={async () => {
+                    await signOut({ redirect: false });
+                    setDeletedReason(null);
+                    router.push('/login');
+                 }} 
+                 className="w-full py-4 bg-white text-black rounded-2xl font-black uppercase tracking-wider text-xs hover:bg-slate-200 transition-all shadow-xl"
+               >
+                 Đã hiểu
+               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Ban Overlay Modal */}
+      <AnimatePresence>
+        {banInfo && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            className="fixed inset-0 z-[999] bg-red-950/90 backdrop-blur-3xl flex items-center justify-center p-4"
+          >
+            <motion.div 
+               initial={{ scale: 0.9, y: 20 }}
+               animate={{ scale: 1, y: 0 }}
+               className="max-w-md w-full bg-[#0a0000] border border-red-500/30 rounded-[32px] p-8 shadow-[0_0_100px_rgba(239,68,68,0.2)] text-center relative overflow-hidden"
+            >
+               {/* Flashing glow */}
+               <motion.div 
+                 animate={{ opacity: [0.3, 0.6, 0.3] }} 
+                 transition={{ duration: 2, repeat: Infinity }}
+                 className="absolute top-0 left-1/2 -translate-x-1/2 w-64 h-32 bg-red-500/20 blur-[60px] pointer-events-none"
+               />
+               
+               <div className="w-20 h-20 bg-red-500/10 border border-red-500/20 rounded-full flex items-center justify-center mx-auto mb-6 relative">
+                 <AlertOctagon className="w-10 h-10 text-red-500" />
+               </div>
+               
+               <h2 className="text-3xl font-black text-white uppercase tracking-tight mb-2">Tài Khoản Bị Khóa</h2>
+               <p className="text-red-400 font-medium mb-8">Bạn không thể truy cập hệ thống vào lúc này.</p>
+               
+               <div className="space-y-4 text-left">
+                  <div className="bg-white/5 border border-white/5 rounded-2xl p-4">
+                     <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-1">Lý do khóa</p>
+                     <p className="text-sm font-medium text-white">{banInfo.reason}</p>
+                  </div>
+                  
+                  <div className="bg-red-500/5 border border-red-500/10 rounded-2xl p-4 flex items-center gap-3">
+                     <Clock className="w-5 h-5 text-red-400" />
+                     <div>
+                        <p className="text-[10px] font-black text-red-500/70 uppercase tracking-widest mb-0.5">Thời hạn khóa đến</p>
+                        <p className="text-sm font-black text-red-400">
+                          {banInfo.until === 0 || banInfo.until > 4102444800000 ? "VĨNH VIỄN" : new Date(banInfo.until).toLocaleString('vi-VN', { dateStyle: 'full', timeStyle: 'short' })}
+                        </p>
+                     </div>
+                  </div>
+               </div>
+               
+               <button 
+                 onClick={async () => {
+                    await signOut({ redirect: false });
+                    setBanInfo(null);
+                    router.push('/login');
+                 }} 
+                 className="mt-8 w-full py-3.5 bg-white/5 hover:bg-white/10 text-white border border-white/10 rounded-xl font-bold uppercase tracking-wider text-sm transition-all"
+               >
+                 Quay lại đăng nhập
+               </button>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
       {/* Left Column - Form */}
       <div className="w-full lg:w-1/2 flex flex-col justify-center items-center px-6 sm:px-10 relative overflow-y-auto">
         <motion.div 
@@ -104,21 +266,48 @@ export default function LoginPage() {
             </div>
             
             <div className="space-y-3">
-              <div className="relative group">
-                <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Mail className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
+              <div>
+                <div className="relative group">
+                  <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                    <Mail className="h-5 w-5 text-gray-500 group-focus-within:text-cyan-400 transition-colors" />
+                  </div>
+                  <input
+                    type="email"
+                    required
+                    name="email"
+                    id="email"
+                    autoComplete="username"
+                    value={formData.email}
+                    onChange={(e) => handleEmailChange(e.target.value)}
+                    className={`block w-full pl-10 pr-3 py-2 border rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none sm:text-sm transition-all shadow-inner ${
+                      emailValidation && !emailValidation.isValid 
+                        ? "border-red-500/50 focus:border-red-500 focus:ring-1 focus:ring-red-500" 
+                        : "border-gray-800 focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500"
+                    }`}
+                    placeholder={authT.emailPlaceholder}
+                  />
                 </div>
-                <input
-                  type="email"
-                  required
-                  name="email"
-                  id="email"
-                  autoComplete="username"
-                  value={formData.email}
-                  onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                  className="block w-full pl-10 pr-3 py-2 border border-gray-800 rounded-xl leading-5 bg-[#0a1128] text-gray-300 placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 sm:text-sm transition-all shadow-inner"
-                  placeholder={authT.emailPlaceholder}
-                />
+                <AnimatePresence>
+                  {emailValidation && !emailValidation.isValid && (
+                    <motion.p
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: "auto" }}
+                      exit={{ opacity: 0, height: 0 }}
+                      className="text-red-400 text-xs ml-1 mt-1.5 font-medium flex flex-wrap gap-1 items-baseline"
+                    >
+                      <span>{emailValidation.error}</span>
+                      {emailValidation.suggestion && (
+                        <button 
+                          type="button"
+                          onClick={() => handleEmailChange(formData.email.split('@')[0] + '@' + emailValidation.suggestion)}
+                          className="text-cyan-400 hover:text-cyan-300 underline underline-offset-2 decoration-cyan-400/30"
+                        >
+                          Bạn muốn nhập @{emailValidation.suggestion}?
+                        </button>
+                      )}
+                    </motion.p>
+                  )}
+                </AnimatePresence>
               </div>
 
               <div className="relative group">
@@ -160,9 +349,9 @@ export default function LoginPage() {
               </div>
 
               <div className="text-sm">
-                <button onClick={handleForgotPassword} type="button" className="font-medium text-cyan-400 hover:text-cyan-300 transition-colors">
+                <Link href="/forgot-password" title={authT.forgot} className="font-medium text-cyan-400 hover:text-cyan-300 transition-colors">
                   {authT.forgot}
-                </button>
+                </Link>
               </div>
             </div>
 

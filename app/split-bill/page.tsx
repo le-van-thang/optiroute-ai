@@ -233,6 +233,7 @@ function SplitBillContent() {
   }, [searchParams]);
 
   const [showExpForm, setShowExpForm] = useState(false);
+  const [customConfirm, setCustomConfirm] = useState<{title?: string, message: string, onConfirm: () => void} | null>(null);
   const [amountInput, setAmountInput] = useState("");
   const [memberInput, setMemberInput] = useState("");
   const [expForm, setExpForm] = useState<Omit<Expense, "id">>(({ name: "", amount: 0, paidBy: "", participants: [] }));
@@ -776,20 +777,26 @@ function SplitBillContent() {
 
   const handleDeleteSettlement = async (settlementId: string) => {
     if (!activeTrip) return;
-    if (!confirm(lang === "vi" ? "Bạn có chắc muốn hủy báo cáo thanh toán này?" : "Cancel this payment report?")) return;
     
-    try {
-      const res = await fetch(`/api/trips/${activeTrip.id}/settlements/${settlementId}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("Failed to delete settlement");
-      
-      setDbSettlements(prev => prev.filter(s => s.id !== settlementId));
-      showToast(lang === "vi" ? "Đã hủy báo cáo thanh toán" : "Payment report cancelled", "success");
-    } catch (e) {
-      console.error(e);
-      showToast(lang === "vi" ? "Lỗi khi hủy báo cáo" : "Error cancelling report", "error");
-    }
+    setCustomConfirm({
+      title: lang === "vi" ? "Hủy báo cáo?" : "Cancel report?",
+      message: lang === "vi" ? "Bạn có chắc muốn hủy báo cáo thanh toán này?" : "Cancel this payment report?",
+      onConfirm: async () => {
+        setCustomConfirm(null);
+        try {
+          const res = await fetch(`/api/trips/${activeTrip.id}/settlements/${settlementId}`, {
+            method: "DELETE",
+          });
+          if (!res.ok) throw new Error("Failed to delete settlement");
+          
+          setDbSettlements(prev => prev.filter(s => s.id !== settlementId));
+          showToast(lang === "vi" ? "Đã hủy báo cáo thanh toán" : "Payment report cancelled", "success");
+        } catch (e) {
+          console.error(e);
+          showToast(lang === "vi" ? "Lỗi khi hủy báo cáo" : "Error cancelling report", "error");
+        }
+      }
+    });
   };
 
   const totalAmount = useMemo(() => expenses.reduce((s, e) => s + e.amount, 0), [expenses]);
@@ -893,6 +900,7 @@ function SplitBillContent() {
                     {activeTrip ? `${activeTrip.title}${activeTrip.city ? ` • ${activeTrip.city}` : ""}` : (lang === "vi" ? "Chế độ cá nhân (Offline)" : "Personal Mode (Offline)")}
                   </span>
                 </div>
+
                 {loadingTrip ? (
                   <Loader2 className="w-4 h-4 text-indigo-400 animate-spin flex-shrink-0" />
                 ) : (
@@ -1054,9 +1062,34 @@ function SplitBillContent() {
             <div className="absolute -top-24 -right-12 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none"></div>
             <div className="flex flex-col sm:flex-row justify-between gap-8 relative z-10">
               <div className="flex-1">
-                <div className="flex items-center gap-2 mb-2">
-                  <Wallet className="w-4 h-4 text-indigo-300" />
-                  <p className="text-xs font-bold uppercase tracking-widest text-indigo-300/80">Tổng chi phí nhóm</p>
+                <div className="flex items-center justify-between mb-2">
+                  <div className="flex items-center gap-2">
+                    <Wallet className="w-4 h-4 text-indigo-300" />
+                    <p className="text-xs font-bold uppercase tracking-widest text-indigo-300/80">Tổng chi phí nhóm</p>
+                  </div>
+                  {!isMultiplayer && (
+                    <button 
+                      onClick={() => {
+                          setCustomConfirm({
+                             title: lang === "vi" ? "Xóa dữ liệu Offline?" : "Clear Offline Data?",
+                             message: lang === "vi" ? "Bạn có chắc muốn xóa sạch dữ liệu Chế độ cá nhân (Offline)? Bạn không thể hoàn tác hành động này." : "Are you sure you want to clear Personal Mode (Offline) data? This cannot be undone.",
+                             onConfirm: () => {
+                                localStorage.removeItem("optiroute_sb_members");
+                                localStorage.removeItem("optiroute_sb_expenses");
+                                setMembers([{ id: "me", name: lang === "vi" ? "Bạn" : "You", color: MEMBER_COLORS[0] }]);
+                                setExpenses([]);
+                                setCustomConfirm(null);
+                                showToast(lang === "vi" ? "Đã dọn dẹp bộ nhớ thiết bị" : "Personal data reset", "success");
+                             }
+                          });
+                      }}
+                      className="flex items-center gap-1.5 px-2.5 py-1.5 bg-rose-500/10 hover:bg-rose-500 text-rose-500 hover:text-white rounded-lg transition-all text-xs font-black uppercase tracking-widest cursor-pointer"
+                      title={lang === "vi" ? "Xóa bộ nhớ tạm" : "Reset Data"}
+                    >
+                       <Trash2 className="w-3 h-3" />
+                       {lang === "vi" ? "Làm mới" : "Reset"}
+                    </button>
+                  )}
                 </div>
                 <div className="flex items-baseline gap-2 mb-4">
                   <h2 className="text-3xl md:text-4xl font-black text-white tracking-tight leading-none bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400">
@@ -1169,9 +1202,14 @@ function SplitBillContent() {
                       {member.id !== myId && (!isMultiplayer || amILeader) && (
                         <button 
                           onClick={() => {
-                            if (confirm(lang === "vi" ? `Xóa ${member.name} khỏi nhóm?` : `Remove ${member.name} from group?`)) {
-                              removeMember(member.id);
-                            }
+                            setCustomConfirm({
+                              title: lang === "vi" ? "Xóa thành viên?" : "Remove member?",
+                              message: lang === "vi" ? `Bạn chắc chắn muốn xóa ${member.name} khỏi nhóm chia tiền này?` : `Remove ${member.name} from group?`,
+                              onConfirm: () => { 
+                                removeMember(member.id); 
+                                setCustomConfirm(null); 
+                              }
+                            });
                           }} 
                           className="text-slate-500 hover:text-rose-400 p-2 transition-colors"
                         >
@@ -1668,6 +1706,35 @@ function SplitBillContent() {
               setViewingSettlement(null);
             }}
           />
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence>
+        {customConfirm && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4">
+             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="absolute inset-0 bg-slate-950/90 backdrop-blur-xl" onClick={() => setCustomConfirm(null)} />
+             <motion.div initial={{ opacity: 0, scale: 0.95, y: 20 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.95, y: 20 }}
+               className="relative w-full max-w-sm bg-[#0a1128] border border-white/10 rounded-[28px] shadow-2xl overflow-hidden p-6"
+             >
+               <h3 className="text-xl font-black text-white text-center mb-2">{customConfirm.title || "Xác nhận"}</h3>
+               <p className="text-slate-400 text-sm text-center mb-6 px-2 leading-relaxed">{customConfirm.message}</p>
+               
+               <div className="flex gap-3">
+                 <button 
+                   onClick={() => setCustomConfirm(null)} 
+                   className="flex-1 py-3 bg-slate-900 hover:bg-slate-800 text-slate-400 border border-white/5 hover:text-white rounded-2xl font-bold text-xs uppercase tracking-widest transition-colors"
+                 >
+                   Hủy
+                 </button>
+                 <button 
+                   onClick={customConfirm.onConfirm}
+                   className="flex-1 py-3 bg-rose-600 hover:bg-rose-500 text-white rounded-2xl font-black text-xs uppercase tracking-widest shadow-lg shadow-rose-900/20 transition-all"
+                 >
+                   Tiếp tục
+                 </button>
+               </div>
+             </motion.div>
+          </div>
         )}
       </AnimatePresence>
     </div>

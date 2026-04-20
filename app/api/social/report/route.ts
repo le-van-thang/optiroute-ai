@@ -9,7 +9,7 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user?.id) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const { reportedId, conversationId, reason, content } = await req.json();
+    const { reportedId, conversationId, reason, content, proofImage } = await req.json();
 
     if (!reportedId || !reason) return NextResponse.json({ error: "Missing information" }, { status: 400 });
 
@@ -19,7 +19,8 @@ export async function POST(req: Request) {
         reportedId,
         conversationId,
         reason,
-        content
+        content,
+        proofImage
       }
     });
 

@@ -32,11 +32,38 @@ export async function POST(req: Request) {
       }
     });
 
+    // Thông tin người nhận
+    const receiverUser = await prisma.user.findUnique({
+      where: { id: receiverId }
+    });
+
+    // 1. Tạo Notification cho người nhận (kèm tính năng tương tác ở Navbar)
+    await prisma.notification.create({
+      data: {
+        userId: receiverId,
+        message: `Bạn nhận được lời mời kết bạn từ ${session.user.name}`,
+        link: `friend-request:${friendship.id}:${session.user.id}`
+      }
+    });
+
+    // 2. Tạo Notification cho người gửi (xác nhận)
+    await prisma.notification.create({
+      data: {
+        userId: session.user.id,
+        message: `Bạn đã gửi lời mời kết bạn đến ${receiverUser?.name || "người dùng này"}`,
+        link: `/social?tab=requests`
+      }
+    });
+
     // Thông báo real-time cho người nhận qua kênh riêng tư
     await pusherServer.trigger(`private-user-${receiverId}`, "friend-request", {
       fromName: session.user.name,
       fromId: session.user.id
     });
+
+    // Kích hoạt re-fetch notification cho cả 2 qua Pusher (nếu hệ thống đã hỗ trợ)
+    await pusherServer.trigger(`private-user-${receiverId}`, "notification-update", {});
+    await pusherServer.trigger(`private-user-${session.user.id}`, "notification-update", {});
 
     return NextResponse.json(friendship);
   } catch (error: any) {
@@ -87,6 +114,25 @@ export async function PATCH(req: Request) {
         });
       }
 
+      // Xóa thông báo yêu cầu kết bạn ban đầu của người nhận
+      await prisma.notification.deleteMany({
+        where: {
+          userId: session.user.id,
+          link: {
+            startsWith: `friend-request:${requestId}`
+          }
+        }
+      });
+
+      // Tạo thông báo cho người gửi biết đã được chấp nhận
+      await prisma.notification.create({
+        data: {
+          userId: updated.senderId,
+          message: `${session.user.name} đã chấp nhận lời mời kết bạn của bạn!`,
+          link: `/social`
+        }
+      });
+
       // Thông báo cho cả 2 người qua Pusher
       const eventData = {
         friendId: session.user.id,
@@ -95,7 +141,10 @@ export async function PATCH(req: Request) {
       };
 
       await pusherServer.trigger(`private-user-${updated.senderId}`, "friend-request-accepted", eventData);
+      await pusherServer.trigger(`private-user-${updated.senderId}`, "notification-update", {});
+      
       await pusherServer.trigger(`private-user-${updated.receiverId}`, "friend-request-accepted", eventData);
+      await pusherServer.trigger(`private-user-${updated.receiverId}`, "notification-update", {});
 
       return NextResponse.json(updated);
     } else {
@@ -105,10 +154,31 @@ export async function PATCH(req: Request) {
         include: { sender: true, receiver: true }
       });
       
-      // Thông báo cho người gửi biết yêu cầu bị từ chối (tùy chọn)
+      // Xóa thông báo yêu cầu kết bạn ban đầu của người nhận
+      await prisma.notification.deleteMany({
+        where: {
+          userId: session.user.id,
+          link: {
+            startsWith: `friend-request:${requestId}`
+          }
+        }
+      });
+
+      // Tạo thông báo cho người gửi biết đã bị từ chối
+      await prisma.notification.create({
+        data: {
+          userId: deleted.senderId,
+          message: `${session.user.name} đã từ chối lời mời kết bạn của bạn.`,
+          link: `/social`
+        }
+      });
+
+      // Thông báo cho người gửi biết yêu cầu bị từ chối và cập nhật thông báo
       await pusherServer.trigger(`private-user-${deleted.senderId}`, "friend-request-rejected", {
         friendId: session.user.id
       });
+      await pusherServer.trigger(`private-user-${deleted.senderId}`, "notification-update", {});
+      await pusherServer.trigger(`private-user-${session.user.id}`, "notification-update", {});
 
       return NextResponse.json({ success: true });
     }

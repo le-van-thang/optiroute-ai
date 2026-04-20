@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { motion, AnimatePresence, Variants } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
 import { Map, Plane, Wallet, Sparkles, Clock, ArrowRight, MapPin, Plus, Loader2, X, Search, Trash2, ChevronRight, Tag, TrendingUp, AlertCircle, Bike } from "lucide-react";
@@ -52,6 +52,18 @@ export default function DashboardPage() {
 
   const { data: trips, mutate: mutateTrips, isLoading: isTripsLoading } = useSWR("/api/trips", fetcher);
   const { data: expenses, isLoading: isExpensesLoading } = useSWR("/api/expenses", fetcher);
+
+  const [dynamicCity, setDynamicCity] = useState("Hà Nội");
+  
+  useEffect(() => {
+    const cycleCities = ["Hà Nội", "Hà Giang", "Đà Nẵng", "Đà Lạt", "Phú Quốc", "Tokyo", "Seoul", "Sapa", "Ninh Bình", "Hội An", "Bangkok", "Singapore", "Paris"];
+    let idx = 0;
+    const interval = setInterval(() => {
+      idx = (idx + 1) % cycleCities.length;
+      setDynamicCity(cycleCities[idx]);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
 
   const COLORS = ['#22d3ee', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6'];
   const chartData = Array.isArray(expenses) ? expenses.map((exp: any) => ({
@@ -439,7 +451,7 @@ export default function DashboardPage() {
                         value={formData.title} 
                         onChange={e => setFormData({...formData, title: e.target.value})} 
                         type="text" 
-                        placeholder={dashT.placeholderTripName} 
+                        placeholder={lang === "vi" ? `Chuyến đi ${dynamicCity}...` : `My ${dynamicCity} Trip...`} 
                         className="w-full pl-6 pr-6 py-4.5 bg-slate-950/50 border border-white/5 rounded-[1.5rem] text-white focus:bg-slate-950 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner"
                       />
                     </div>
@@ -455,7 +467,7 @@ export default function DashboardPage() {
                         value={formData.city} 
                         onChange={e => setFormData({...formData, city: e.target.value})} 
                         type="text" 
-                        placeholder={dashT.placeholderCity} 
+                        placeholder={dynamicCity} 
                         className="w-full pl-6 pr-6 py-4.5 bg-slate-950/50 border border-white/5 rounded-[1.5rem] text-white focus:bg-slate-950 focus:border-cyan-500/50 focus:ring-4 focus:ring-cyan-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner"
                       />
                     </div>
@@ -466,7 +478,7 @@ export default function DashboardPage() {
                         <TrendingUp className="w-3 h-3" />
                         {lang === "vi" ? "Gợi ý:" : "Hot:"}
                       </span>
-                      {["Singapore", "Đà Lạt", "Phú Quốc", "Tokyo", "Seoul"].map((city) => (
+                      {["Hà Nội", "Hà Giang", "Đà Nẵng", "Đà Lạt", "Phú Quốc", "Tokyo"].map((city) => (
                         <button
                           key={city}
                           type="button"
@@ -474,7 +486,7 @@ export default function DashboardPage() {
                           className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border ${
                             formData.city === city 
                               ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20" 
-                              : "bg-white/5 border-white/5 text-slate-500 hover:text-white hover:bg-white/10"
+                              : "bg-white/[0.03] border-white/[0.05] text-slate-600 hover:text-slate-400 hover:bg-white/[0.08]"
                           }`}
                         >
                           {city}

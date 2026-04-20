@@ -21,8 +21,8 @@ export async function GET() {
       take: 5,
       orderBy: { createdAt: "desc" },
       include: {
-        reporter: { select: { name: true } },
-        reported: { select: { name: true } }
+        reporter: { select: { name: true, email: true } },
+        reported: { select: { name: true, email: true } }
       }
     });
 

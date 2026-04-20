@@ -144,6 +144,38 @@ export function Navbar() {
     return () => clearInterval(interval);
   }, [session]);
 
+  // ============================================
+  // Real-time Presence Engine (Heartbeat System)
+  // ============================================
+  useEffect(() => {
+    if (!session?.user?.email) return;
+
+    const triggerHeartbeat = async () => {
+      // Tạm ngưng nhịp tim nếu người dùng chuyển tab sang xem YouTube hoặc thu nhỏ trình duyệt
+      if (document.visibilityState !== "visible") return;
+
+      try {
+        await fetch("/api/user/heartbeat", { method: "PATCH" });
+      } catch (e) {}
+    };
+
+    triggerHeartbeat();
+    const heartbeatInterval = setInterval(triggerHeartbeat, 60000);
+
+    // Bắn ngay nhịp tim khi người dùng quay lại tab này
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        triggerHeartbeat();
+      }
+    };
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+    };
+  }, [session]);
+
   const markAllAsRead = async () => {
     if (unreadCount === 0) return;
     try {
@@ -170,6 +202,29 @@ export function Navbar() {
       }
     } catch (err) {
       console.error("Failed to delete notification", err);
+    }
+  };
+
+  const handleFriendAction = async (requestId: string, action: "ACCEPTED" | "REJECTED", e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    try {
+      const res = await fetch("/api/social/friends", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId, status: action })
+      });
+      if (res.ok) {
+        // Refresh notifications
+        const fetchRes = await fetch("/api/notifications");
+        if (fetchRes.ok) {
+          const data = await fetchRes.json();
+          setNotifications(data.notifications || []);
+          setUnreadCount(data.unreadCount || 0);
+        }
+      }
+    } catch (err) {
+      console.error(err);
     }
   };
 
@@ -373,6 +428,8 @@ export function Navbar() {
                             {notifications.map((notif) => {
                               const isPayment = notif.message.toLowerCase().includes("thanh toán") || notif.message.toLowerCase().includes("trả nợ");
                               const isBankReq = notif.message.toLowerCase().includes("stk") || notif.message.toLowerCase().includes("ngân hàng");
+                              const isFriendReq = notif.link?.startsWith("friend-request:");
+                              const [_, reqId, senderId] = isFriendReq && notif.link ? notif.link.split(":") : [];
                               
                               return (
                                 <motion.div
@@ -385,6 +442,7 @@ export function Navbar() {
                                   <div className="relative group/item mb-1">
                                     <Link 
                                       href={(() => {
+                                        if (isFriendReq) return "#";
                                         if (!notif.link) return "#";
                                         const isPayMsg = notif.message?.toLowerCase().includes("thanh toán") || notif.message?.toLowerCase().includes("trả nợ");
                                         if (isPayMsg && !notif.link.includes("tab=settle")) {
@@ -394,7 +452,7 @@ export function Navbar() {
                                         return notif.link;
                                       })()} 
                                       onClick={(e) => {
-                                        setShowNotifications(false);
+                                        if (!isFriendReq) setShowNotifications(false);
                                       }}
                                       className={`group block p-4 rounded-2xl transition-all relative overflow-hidden ${!notif.isRead ? 'bg-white/[0.03] hover:bg-white/[0.06]' : 'opacity-60 hover:opacity-100 hover:bg-white/5'}`}
                                     >
@@ -405,10 +463,12 @@ export function Navbar() {
                                         <div className={`w-10 h-10 rounded-xl flex-shrink-0 flex items-center justify-center transition-transform group-hover:scale-110 duration-500 ${
                                           isPayment ? 'bg-emerald-500/10 text-emerald-400' : 
                                           isBankReq ? 'bg-amber-500/10 text-amber-400' : 
+                                          isFriendReq ? 'bg-blue-500/10 text-blue-400' :
                                           'bg-indigo-500/10 text-indigo-400'
                                         }`}>
                                           {isPayment ? <Landmark className="w-5 h-5" /> : 
                                            isBankReq ? <CreditCard className="w-5 h-5" /> : 
+                                           isFriendReq ? <Users className="w-5 h-5" /> :
                                            <Bell className="w-5 h-5" />}
                                         </div>
                                         <div className="flex-1 space-y-1.5 min-w-0">
@@ -424,6 +484,12 @@ export function Navbar() {
                                                 {new Date(notif.createdAt).toLocaleDateString(lang === 'vi' ? 'vi-VN' : 'en-US')}
                                              </span>
                                           </div>
+                                          {isFriendReq && reqId && (
+                                            <div className="flex gap-2 mt-2 pt-1">
+                                              <button onClick={(e) => handleFriendAction(reqId, "ACCEPTED", e)} className="flex-1 max-w-[100px] py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] uppercase font-bold rounded-lg transition-colors shadow-sm">Chấp nhận</button>
+                                              <button onClick={(e) => handleFriendAction(reqId, "REJECTED", e)} className="flex-1 max-w-[100px] py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-300 text-[10px] uppercase font-bold rounded-lg transition-colors shadow-sm border border-white/5">Từ chối</button>
+                                            </div>
+                                          )}
                                         </div>
                                       </div>
                                     </Link>

@@ -14,11 +14,20 @@ interface Stats {
   messageCount: number;
 }
 
+const REASON_LABELS: Record<string, string> = {
+  SPAM: "Làm phiền / Spam",
+  HARASSMENT: "Quấy rối / Đe dọa",
+  SCAM: "Lừa đảo / Chiếm đoạt",
+  INAPPROPRIATE: "Nội dung phản cảm",
+  OTHER: "Lý do khác"
+};
+
 interface RecentReport {
   id: string;
   reason: string;
-  reporter: { name: string };
-  reported: { name: string };
+  status: "PENDING" | "RESOLVED" | "DISMISSED";
+  reporter: { name: string; email: string };
+  reported: { name: string; email: string };
   createdAt: string;
 }
 
@@ -107,14 +116,24 @@ export default function AdminDashboard() {
                          <Bell className="w-5 h-5 text-orange-500" />
                       </div>
                       <div>
-                        <p className="text-sm font-black text-white mb-0.5">{report.reason}</p>
+                        <p className="text-sm font-black text-white mb-0.5">{REASON_LABELS[report.reason] || report.reason}</p>
                         <p className="text-[10px] text-slate-500 font-bold uppercase tracking-wider">
                            Từ: <span className="text-slate-300">{report.reporter.name}</span> • Đối với: <span className="text-slate-300">{report.reported.name}</span>
+                        </p>
+                        <p className="text-[9px] text-slate-600 font-semibold mt-1">
+                           ({report.reported.email})
                         </p>
                       </div>
                    </div>
                    <div className="text-right">
-                      <p className="text-[9px] font-black text-slate-500 uppercase flex items-center gap-1.5">
+                      <div className={`text-[8px] font-black uppercase px-2 py-0.5 rounded-full border mb-2 inline-block ${
+                        report.status === 'PENDING' 
+                        ? 'bg-orange-500/10 text-orange-500 border-orange-500/20' 
+                        : 'bg-emerald-500/10 text-emerald-500 border-emerald-500/20'
+                      }`}>
+                         {report.status === 'PENDING' ? 'Chờ xử lý' : 'Đã xử lý'}
+                      </div>
+                      <p className="text-[9px] font-black text-slate-500 uppercase flex items-center justify-end gap-1.5">
                          <Clock className="w-3 h-3" />
                          {new Date(report.createdAt).toLocaleDateString()}
                       </p>
