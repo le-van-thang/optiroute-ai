@@ -5,6 +5,35 @@ import prisma from "@/lib/prisma";
 
 type RouteContext = { params: Promise<{ tripId: string }> };
 
+export async function GET(req: Request, { params }: RouteContext) {
+  try {
+    const { tripId } = await params;
+    const session = await getServerSession(authOptions);
+
+    if (!session?.user?.email) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+      include: {
+        tripItems: {
+          include: { place: true },
+          orderBy: { orderIndex: "asc" },
+        },
+      },
+    });
+
+    if (!trip) {
+      return NextResponse.json({ error: "Trip not found" }, { status: 404 });
+    }
+
+    return NextResponse.json(trip);
+  } catch (error: any) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
 export async function DELETE(req: Request, { params }: RouteContext) {
   try {
     const { tripId } = await params;

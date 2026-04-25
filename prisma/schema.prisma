@@ -111,6 +111,9 @@ model Trip {
   startDate    DateTime?
   endDate      DateTime?
   city         String?
+  intent       String?
+  cityWiki     String?
+  estimatedBudget Float?
   // Phase 21: Invite system
   inviteCode   String?       @unique
 
@@ -294,4 +297,14 @@ model DeletedAccountRecord {
   reason    String
   adminName String?
   deletedAt DateTime @default(now())
+}
+
+model ItineraryCache {
+  id           String   @id @default(uuid())
+  promptHash   String   @unique
+  query        String
+  city         String
+  intentData   Json     // Stores { city, budget, themes, suggested_places, cost_breakdown }
+  createdAt    DateTime @default(now())
+  expiresAt    DateTime
 }

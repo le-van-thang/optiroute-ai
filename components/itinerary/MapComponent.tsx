@@ -129,29 +129,36 @@ export default function MapComponent({
   useEffect(() => {
     // We prioritize navFocusPoint for camera centering during navigation
     if (isNavigating && navFocusPoint && mapRef.current) {
+      const map = mapRef.current.getMap();
+      if (!map) return; // Safety check for unmounted state
+
       let bearing = viewState.bearing;
       if (userLocation) {
         bearing = getBearing(userLocation.lat, userLocation.lng, navFocusPoint.lat, navFocusPoint.lng);
       }
 
-      mapRef.current.flyTo({
+      map.flyTo({
         center: [navFocusPoint.lng, navFocusPoint.lat],
         zoom: 17,
-        pitch: 60, // 3D Tilt for GPS feel
+        pitch: 60, 
         bearing: bearing, 
         duration: 1500,
         essential: true,
       });
     } else if (!isNavigating && activeLocation && mapRef.current) {
-      mapRef.current.flyTo({
+      const map = mapRef.current.getMap();
+      if (!map) return;
+
+      map.flyTo({
         center: [activeLocation.lng, activeLocation.lat],
         zoom: 15,
         pitch: 0,
         bearing: 0,
         duration: 2000,
+        essential: true,
       });
     }
-  }, [isNavigating, navFocusPoint, userLocation]);
+  }, [isNavigating, navFocusPoint, userLocation, activeLocation]);
 
   // Đồng bộ tâm bản đồ ban đầu
   React.useEffect(() => {
@@ -180,20 +187,23 @@ export default function MapComponent({
   }, [locations]);
 
   const handleZoomIn = () => {
-    mapRef.current?.zoomIn();
+    mapRef.current?.getMap()?.zoomIn();
   };
 
   const handleZoomOut = () => {
-    mapRef.current?.zoomOut();
+    mapRef.current?.getMap()?.zoomOut();
   };
 
   const handleGeolocate = () => {
     if ("geolocation" in navigator) {
       navigator.geolocation.getCurrentPosition((pos) => {
-        mapRef.current?.flyTo({
+        const map = mapRef.current?.getMap();
+        if (!map) return;
+        map.flyTo({
           center: [pos.coords.longitude, pos.coords.latitude],
           zoom: 14,
           duration: 2000,
+          essential: true,
         });
       });
     }

@@ -127,15 +127,16 @@ export function Navbar() {
     if (!session?.user) return;
     
     const fetchNotifications = async () => {
+      if (!session?.user) return;
       try {
-        const res = await fetch("/api/notifications");
-        if (res.ok) {
+        const res = await fetch("/api/notifications").catch(() => null);
+        if (res && res.ok) {
           const data = await res.json();
           setNotifications(data.notifications || []);
           setUnreadCount(data.unreadCount || 0);
         }
       } catch (err) {
-        console.error("Failed to fetch notifications", err);
+        // Silent catch for network jitter or server restarts
       }
     };
 

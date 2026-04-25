@@ -41,7 +41,8 @@ export default function DashboardPage() {
   const [prompt, setPrompt] = useState("");
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [formData, setFormData] = useState({ title: "", city: "" });
+  const [submittingStep, setSubmittingStep] = useState("");
+  const [aiPrompt, setAiPrompt] = useState("");
   const [error, setError] = useState("");
   const { showToast } = useToast();
   
@@ -73,8 +74,8 @@ export default function DashboardPage() {
 
   const handleCreateTrip = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formData.title) {
-      setError(dashT.errorRequired);
+    if (!aiPrompt.trim()) {
+      setError(lang === "vi" ? "Vui lòng cho tôi biết ý tưởng chuyến đi của bạn!" : "Please tell me about your trip idea!");
       return;
     }
     
@@ -82,10 +83,32 @@ export default function DashboardPage() {
     setError("");
 
     try {
+      // Step 1: AI Parsing of the prompt
+      setSubmittingStep(lang === "vi" ? "AI đang dịch ý tưởng của bạn..." : "AI is translating your vision...");
+      const parseRes = await fetch("/api/trips/ai-parse", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: aiPrompt, lang }),
+      });
+      
+      if (!parseRes.ok) throw new Error("AI parsing failed");
+      const aiData = await parseRes.json();
+
+      // Step 2: Create the trip with enriched data
+      setSubmittingStep(lang === "vi" ? "Đang chuẩn bị cẩm nang điểm đến..." : "Preparing destination guide...");
       const res = await fetch("/api/trips", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({
+          title: aiData.title,
+          city: aiData.city,
+          intent: aiData.intent,
+          cityWiki: aiData.wiki,
+          estimatedBudget: aiData.estimatedBudgetPerDay * aiData.days,
+          // Calculate start/end dates based on suggested days
+          startDate: new Date(),
+          endDate: new Date(Date.now() + aiData.days * 24 * 60 * 60 * 1000)
+        }),
       });
 
       if (!res.ok) {
@@ -93,10 +116,14 @@ export default function DashboardPage() {
         throw new Error(data.error || "Failed to create trip");
       }
 
-      await mutateTrips(); // Automatically update UI
+      const newTrip = await res.json();
+      await mutateTrips();
       setIsModalOpen(false);
-      setFormData({ title: "", city: "" });
-      showToast(lang === "vi" ? "Đã tạo chuyến đi mới!" : "New trip created!", "success");
+      setAiPrompt("");
+      showToast(lang === "vi" ? "AI đã sẵn sàng hành trình cho bạn!" : "AI has prepared your itinerary!", "success");
+      
+      // Auto-redirect to the itinerary page
+      router.push(`/itinerary?tripId=${newTrip.id}`);
     } catch (err: any) {
       setError(err.message);
       showToast(err.message, "error");
@@ -440,56 +467,72 @@ export default function DashboardPage() {
                     </motion.p>
                   )}
                   
-                  <div className="space-y-3">
-                    <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400 ml-1 flex items-center gap-2">
-                       <Tag className="w-3.5 h-3.5" />
-                       {dashT.tripName}
-                    </label>
-                    <div className="relative group/input">
-                      <input 
-                        autoFocus required 
-                        value={formData.title} 
-                        onChange={e => setFormData({...formData, title: e.target.value})} 
-                        type="text" 
-                        placeholder={lang === "vi" ? `Chuyến đi ${dynamicCity}...` : `My ${dynamicCity} Trip...`} 
-                        className="w-full pl-6 pr-6 py-4.5 bg-slate-950/50 border border-white/5 rounded-[1.5rem] text-white focus:bg-slate-950 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner"
-                      />
-                    </div>
-                  </div>
-
-                  <div className="space-y-4">
+                  <div className="space-y-6">
                     <div className="space-y-3">
-                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-cyan-400 ml-1 flex items-center gap-2">
-                         <MapPin className="w-3.5 h-3.5" />
-                         {dashT.tripCity}
+                      <label className="text-[10px] font-black uppercase tracking-[0.2em] text-indigo-400 ml-1 flex items-center gap-2">
+                         <Sparkles className="w-3.5 h-3.5" />
+                         {lang === "vi" ? "Ý tưởng hành trình" : "Voyage Vision"}
                       </label>
-                      <input 
-                        value={formData.city} 
-                        onChange={e => setFormData({...formData, city: e.target.value})} 
-                        type="text" 
-                        placeholder={dynamicCity} 
-                        className="w-full pl-6 pr-6 py-4.5 bg-slate-950/50 border border-white/5 rounded-[1.5rem] text-white focus:bg-slate-950 focus:border-cyan-500/50 focus:ring-4 focus:ring-cyan-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner"
-                      />
+                      <div className="relative group/input">
+                        <textarea 
+                          autoFocus required 
+                          value={aiPrompt} 
+                          onChange={e => setAiPrompt(e.target.value)} 
+                          rows={4}
+                          placeholder={lang === "vi" ? "Ví dụ: Đi phượt khám phá Hà Giang 3 ngày, Nghỉ dưỡng ở Đà Lạt cùng người yêu, hay Food tour Sài Gòn..." : "E.g. 3-day adventure in Ha Giang, Relaxing in Da Lat, or Saigon Food Tour..."} 
+                          className="w-full px-6 py-5 bg-slate-950/50 border border-white/5 rounded-[2rem] text-white focus:bg-slate-950 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner resize-none leading-relaxed"
+                        />
+                      </div>
                     </div>
 
-                    {/* Suggestions Chips */}
                     <div className="flex flex-wrap gap-2 pt-1">
                       <span className="text-[9px] font-bold text-slate-600 uppercase pt-2 pr-1 flex items-center gap-1">
                         <TrendingUp className="w-3 h-3" />
-                        {lang === "vi" ? "Gợi ý:" : "Hot:"}
+                      {lang === "vi" ? "Cảm hứng:" : "Ideas:"}
                       </span>
-                      {["Hà Nội", "Hà Giang", "Đà Nẵng", "Đà Lạt", "Phú Quốc", "Tokyo"].map((city) => (
+                      {[
+                        { label: "Phượt Hà Giang", prompt: "Đi phượt khám phá Hà Giang 3 ngày" },
+                        { label: "Nghỉ dưỡng Đà Lạt", prompt: "Chuyến nghỉ dưỡng lãng mạn tại Đà Lạt" },
+                        { label: "Foodtour Sài Gòn", prompt: "Hành trình Foodtour Sài Gòn 1 ngày ăn sập quận 1" },
+                        { label: "Camping Phú Quốc", prompt: "Cắm trại và ngắm hoàng hôn tại Phú Quốc" }
+                      ].map((item) => (
                         <button
-                          key={city}
+                          key={item.label}
                           type="button"
-                          onClick={() => setFormData({ ...formData, city: city })}
-                          className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border ${
-                            formData.city === city 
-                              ? "bg-indigo-600 border-indigo-500 text-white shadow-lg shadow-indigo-600/20" 
-                              : "bg-white/[0.03] border-white/[0.05] text-slate-600 hover:text-slate-400 hover:bg-white/[0.08]"
-                          }`}
+                          onClick={() => setAiPrompt(item.prompt)}
+                          className="px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-wider transition-all border bg-white/[0.03] border-white/[0.05] text-slate-600 hover:text-slate-400 hover:bg-white/[0.08]"
                         >
-                          {city}
+                          {item.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="flex flex-wrap gap-2 pt-1 border-t border-white/5 mt-4 pt-4">
+                      <span className="text-[9px] font-bold text-indigo-400/60 uppercase pt-2 pr-1 flex items-center gap-1">
+                        <Sparkles className="w-3 h-3" />
+                        {lang === "vi" ? "Phong cách:" : "Style:"}
+                      </span>
+                      {[
+                        { icon: "👨‍👩‍👧‍👦", vi: "Gia đình", en: "Family" },
+                        { icon: "🎒", vi: "Bụi", en: "Adventure" },
+                        { icon: "🍱", vi: "Ẩm thực", en: "Foodie" },
+                        { icon: "💏", vi: "Lãng mạn", en: "Romantic" },
+                        { icon: "🧘", vi: "Nghỉ dưỡng", en: "Relax" },
+                        { icon: "🏰", vi: "Văn hóa", en: "Culture" }
+                      ].map((style) => (
+                        <button
+                          key={style.vi}
+                          type="button"
+                          onClick={() => {
+                            const suffix = lang === "vi" ? ` mang phong cách ${style.vi}` : ` with a ${style.en} style`;
+                            if (!aiPrompt.includes(suffix)) {
+                              setAiPrompt(prev => prev + suffix);
+                            }
+                          }}
+                          className="px-3 py-1 bg-indigo-500/10 border border-indigo-500/20 rounded-lg text-[10px] font-bold text-indigo-300 hover:bg-indigo-500/20 transition-all flex items-center gap-1"
+                        >
+                          <span>{style.icon}</span>
+                          <span>{lang === "vi" ? style.vi : style.en}</span>
                         </button>
                       ))}
                     </div>
@@ -512,8 +555,17 @@ export default function DashboardPage() {
                     className="w-full sm:w-auto px-10 py-4 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white text-xs font-black uppercase tracking-[0.2em] rounded-[1.2rem] shadow-xl shadow-indigo-600/20 disabled:opacity-50 flex items-center justify-center gap-3 relative overflow-hidden group/save"
                   >
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover/save:translate-y-0 transition-transform duration-300" />
-                    {isSubmitting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Sparkles className="w-4 h-4 fill-white/20" />}
-                    <span className="relative z-10">{lang === "vi" ? "Bắt đầu hành trình" : "Launch Voyage"}</span>
+                    {isSubmitting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span className="relative z-10">{submittingStep}</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 fill-white/20" />
+                        <span className="relative z-10">{lang === "vi" ? "Bắt đầu hành trình" : "Launch Voyage"}</span>
+                      </>
+                    )}
                   </motion.button>
                 </div>
               </form>
