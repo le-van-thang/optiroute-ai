@@ -1,6 +1,6 @@
 "use client";
 
-import { ProvinceSelector } from "@/components/itinerary/ProvinceSelector";
+import { ProvinceSelector, VIETNAM_PROVINCES } from "@/components/itinerary/ProvinceSelector";
 import { SearchPromptChips } from "@/components/itinerary/SearchPromptChips";
 import { useLang } from "@/components/providers/LangProvider";
 import { AnimatePresence, motion, Variants } from "framer-motion";
@@ -100,6 +100,7 @@ interface Activity {
   lng?: number;
   completed?: boolean;
   start_time?: string;
+  geocoded?: boolean;
 }
 
 interface DaySessions {
@@ -115,6 +116,16 @@ interface ItineraryDay {
   activities?: Activity[]; // old format
   locations?: Activity[]; // new format (Phase 18)
   sessions?: DaySessions; // new format (Phase 19)
+}
+
+interface WikiBlock {
+  heading: LocalizedString;
+  body: LocalizedString;
+}
+
+interface MagazineWiki {
+  title: LocalizedString;
+  content_blocks: WikiBlock[];
 }
 
 interface LegInfo {
@@ -215,6 +226,16 @@ const PlaceItem = ({
                     >
                       {catLabel[act.category]?.[lang] || act.category}
                     </span>
+                  )}
+                  {/* Verified Badge */}
+                  {act.geocoded && (
+                    <div 
+                      className="flex items-center gap-1 px-1.5 py-0.5 rounded-md bg-blue-500/10 border border-blue-500/20"
+                      title={lang === "vi" ? "Đã được xác thực qua Mapbox" : "Verified via Mapbox"}
+                    >
+                      <CheckCircle2 className="w-2.5 h-2.5 text-blue-400" />
+                      <span className="text-[8px] font-black text-blue-400 uppercase tracking-tighter">Verified</span>
+                    </div>
                   )}
                 </>
               ) : (
@@ -320,7 +341,7 @@ export default function ItineraryPage() {
 
   const [prompt, setPrompt] = useState("");
   const [isGenerating, setIsGenerating] = useState(false);
-  const [error, setError] = useState("");
+  const [error, setError] = useState<string | null>(null);
   const [itineraryResult, setItineraryResult] = useState<ItineraryDay[] | null>(
     null,
   );
@@ -361,6 +382,10 @@ export default function ItineraryPage() {
   const [isMemoriesLoaded, setIsMemoriesLoaded] = useState(false);
   const [isStateRestored, setIsStateRestored] = useState(false);
   const [showFinishTripModal, setShowFinishTripModal] = useState(false);
+  const [activeTrip, setActiveTrip] = useState<any>(null);
+  const [showWiki, setShowWiki] = useState(false);
+  const [costBreakdown, setCostBreakdown] = useState<any>(null);
+  const [magazineWiki, setMagazineWiki] = useState<MagazineWiki | null>(null);
 
   useEffect(() => {
     const savedProv = localStorage.getItem("optiroute_selected_province");
@@ -552,6 +577,56 @@ export default function ItineraryPage() {
     setJourneyNotif(msg);
     setTimeout(() => setJourneyNotif(null), 3500);
   };
+
+  useEffect(() => {
+    const tripId = searchParams?.get("tripId");
+    if (tripId) {
+      const fetchTrip = async () => {
+        try {
+          const res = await fetch(`/api/trips/${tripId}`);
+          if (!res.ok) throw new Error("Trip not found");
+          const trip = await res.json();
+          setActiveTrip(trip);
+
+          // Sync anchor location (selectedProvince)
+          if (trip.city) {
+            const cityUpper = trip.city.toLowerCase();
+            // Map common names to official province names
+            const cityMap: Record<string, string> = {
+              "sài gòn": "TP Hồ Chí Minh",
+              "long thành": "Đồng Nai",
+              "phú quốc": "Kiên Giang",
+              "quy nhơn": "Bình Định",
+              "nha trang": "Khánh Hòa",
+              "đà lạt": "Lâm Đồng",
+              "vũng tàu": "Bà Rịa - Vũng Tàu",
+              "huế": "Thừa Thiên Huế",
+              "buôn ma thuột": "Đắk Lắk",
+              "pleiku": "Gia Lai"
+            };
+            
+            const matchedProv = VIETNAM_PROVINCES.find(p => 
+              p.toLowerCase() === cityUpper || cityUpper.includes(p.toLowerCase())
+            ) || cityMap[cityUpper];
+            
+            if (matchedProv) {
+              setSelectedProvince(matchedProv);
+            }
+          }
+          
+          // Auto-generate if no items
+          if (trip.city && (!trip.tripItems || trip.tripItems.length === 0)) {
+            const genPrompt = trip.intent ? `${trip.title} (${trip.intent}) tại ${trip.city}` : `${trip.title} tại ${trip.city}`;
+            setPrompt(genPrompt);
+            handleGenerate(genPrompt);
+          }
+        } catch (e) {
+          console.error("Fetch trip error:", e);
+        }
+      };
+      fetchTrip();
+    }
+  }, [searchParams]);
 
   // Load from sessionStorage strictly on mount
   useEffect(() => {
@@ -963,6 +1038,8 @@ export default function ItineraryPage() {
     
     // Merge all sessions if they exist
     const day = itineraryResult[activeDayIdx];
+    if (!day) return [];
+
     const allSessions = day.sessions ? [
       ...(day.sessions.morning || []),
       ...(day.sessions.afternoon || []),
@@ -1107,6 +1184,7 @@ export default function ItineraryPage() {
   }, [searchParams]);
 
   const handleGenerate = async (overridePrompt?: string) => {
+    setError(null);
     const textToGenerate = overridePrompt || prompt;
     if (!textToGenerate.trim()) return;
 
@@ -1185,6 +1263,15 @@ export default function ItineraryPage() {
       });
 
       setItineraryResult(migrated);
+      if (data.data.magazine_wiki) {
+        setMagazineWiki(data.data.magazine_wiki);
+      }
+      if (data.data.total_estimated_cost) {
+        setCostBreakdown({
+          total: data.data.total_estimated_cost,
+          breakdown: data.data.cost_breakdown
+        });
+      }
       addToHistory(migrated, textToGenerate);
       setActiveDayIdx(0);
       setJourneyActive(false);
@@ -1274,9 +1361,17 @@ export default function ItineraryPage() {
               <h2 className="text-lg font-bold text-foreground leading-tight">
                 {itinT.sidebarTitle}
               </h2>
-              <p className="text-xs text-slate-500 font-medium tracking-wide">
-                {itinT.sidebarSubtitle}
-              </p>
+              {itineraryResult && (
+                <button
+                  onClick={() => setShowWiki(true)}
+                  className="flex items-center gap-1.5 mt-0.5 group/wiki"
+                >
+                  <span className="text-[10px] text-indigo-400 font-black uppercase tracking-widest group-hover/wiki:text-indigo-300 transition-colors">
+                    {lang === "vi" ? "📖 Khám phá tạp chí du lịch" : "📖 Discover Travel Magazine"}
+                  </span>
+                  <ArrowRight className="w-3 h-3 text-indigo-400 group-hover/wiki:translate-x-0.5 transition-transform" />
+                </button>
+              )}
             </div>
           </div>
 
@@ -1678,28 +1773,42 @@ export default function ItineraryPage() {
                     {/* Phase 17/18: Branch between AI and Local List Rendering */}
                     {searchMode === "ai" && itineraryResult ? (
                       <div className="space-y-6">
-                        {/* Day Tabs */}
-                        {itineraryResult.length > 1 && (
-                          <div className="flex gap-2 overflow-x-auto custom-scrollbar pb-2">
+                        {/* Day Tabs - Harmonious & Minimalist Version */}
+                        <div className="flex items-center gap-3 py-3 border-b border-white/5 mb-4 sticky top-0 z-30 bg-slate-950/80 backdrop-blur-xl">
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => setActiveDayIdx(prev => Math.max(0, prev - 1))}
+                            disabled={activeDayIdx === 0}
+                            className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-500 hover:text-white disabled:opacity-10 transition-all"
+                          >
+                            <ChevronLeft className="w-5 h-5" />
+                          </motion.button>
+                          
+                          <div className="flex-1 flex gap-2 overflow-x-auto custom-scrollbar no-scrollbar py-1">
                             {itineraryResult.map((day, idx) => (
                               <button
                                 key={`tab-${idx}`}
                                 onClick={() => setActiveDayIdx(idx)}
-                                className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap border ${
+                                className={`px-5 py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider transition-all whitespace-nowrap border ${
                                   activeDayIdx === idx
-                                    ? "bg-indigo-600 text-white border-indigo-500 shadow-lg"
-                                    : "bg-slate-900/50 text-slate-400 border-white/5 hover:bg-slate-800 hover:text-slate-200"
+                                    ? "bg-indigo-500/10 text-indigo-400 border-indigo-500/30 shadow-[0_0_15px_rgba(99,102,241,0.1)]"
+                                    : "bg-slate-900/40 text-slate-500 border-white/5 hover:border-white/10 hover:text-slate-300"
                                 }`}
                               >
-                                {typeof day.title === "string"
-                                  ? day.title
-                                  : day.title?.[lang as "vi" | "en"] ||
-                                    day.title?.vi ||
-                                    `Day ${day.day_number || idx + 1}`}
+                                {lang === "vi" ? `N.0${idx + 1}` : `D.0${idx + 1}`}
                               </button>
                             ))}
                           </div>
-                        )}
+
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => setActiveDayIdx(prev => Math.min(itineraryResult.length - 1, prev + 1))}
+                            disabled={activeDayIdx === itineraryResult.length - 1 || itineraryResult.length === 0}
+                            className="p-2 rounded-xl bg-slate-900 border border-white/5 text-slate-500 hover:text-white disabled:opacity-10 transition-all"
+                          >
+                            <ChevronRight className="w-5 h-5" />
+                          </motion.button>
+                        </div>
 
                         {/* Active Day Content — Session-aware rendering */}
                         {itineraryResult[activeDayIdx] &&
@@ -2525,6 +2634,105 @@ export default function ItineraryPage() {
                   </button>
                 </div>
               </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Phase 5: Magazine Wiki Overlay */}
+        <AnimatePresence>
+          {showWiki && magazineWiki && (
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="fixed inset-0 z-[200] flex items-center justify-center p-4 md:p-10 pointer-events-none"
+            >
+              <div className="pointer-events-auto w-full max-w-5xl h-full bg-slate-950 border border-white/10 rounded-[40px] shadow-[0_0_100px_rgba(0,0,0,0.8)] overflow-hidden flex flex-col relative">
+                {/* Close Button */}
+                <button 
+                  onClick={() => setShowWiki(false)}
+                  className="absolute top-8 right-8 z-50 p-3 bg-white/5 hover:bg-white/10 border border-white/10 rounded-full text-white transition-all"
+                >
+                  <X className="w-6 h-6" />
+                </button>
+
+                {/* Banner Image / Gradient */}
+                <div className="h-[300px] w-full bg-gradient-to-br from-indigo-900 to-slate-950 relative overflow-hidden flex-shrink-0">
+                  <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/dark-leather.png')] opacity-20" />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950 to-transparent" />
+                  
+                  <div className="absolute bottom-12 left-12 right-12">
+                    <div className="flex items-center gap-3 mb-4">
+                      <div className="px-3 py-1 bg-indigo-500 text-white text-[10px] font-black uppercase tracking-widest rounded-md">
+                         {lang === "vi" ? "Tạp chí Du lịch" : "Travel Magazine"}
+                      </div>
+                      <div className="text-white/40 text-[10px] font-mono tracking-widest uppercase">
+                         Ed. N° 42 · OptiRoute AI
+                      </div>
+                    </div>
+                    <h1 className="text-3xl md:text-5xl font-black text-white tracking-tight uppercase leading-tight max-w-[80%]">
+                      {getLocString(magazineWiki.title, lang)}
+                    </h1>
+                  </div>
+                </div>
+
+                {/* Article Content */}
+                <div className="flex-1 overflow-y-auto p-12 md:p-20 custom-scrollbar bg-slate-950">
+                  <div className="grid grid-cols-1 md:grid-cols-12 gap-12 md:gap-20">
+                    {/* Main Story */}
+                    <div className="md:col-span-8 space-y-12">
+                      {magazineWiki.content_blocks.map((block, i) => (
+                        <div key={i} className="space-y-4">
+                          <h2 className="text-2xl font-bold text-white tracking-tight border-l-4 border-indigo-500 pl-6">
+                            {getLocString(block.heading, lang)}
+                          </h2>
+                          <p className="text-lg text-slate-400 leading-[1.8] font-medium text-justify">
+                            {getLocString(block.body, lang)}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* Sidebar Stats / Info */}
+                    <div className="md:col-span-4 space-y-10">
+                      <div className="p-8 bg-white/5 border border-white/10 rounded-[32px] space-y-6">
+                        <h3 className="text-xs font-black text-indigo-400 uppercase tracking-widest">
+                           {lang === "vi" ? "Thông tin nhanh" : "Fast Facts"}
+                        </h3>
+                        <div className="space-y-4">
+                          <div>
+                            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">{lang === "vi" ? "Thành phố" : "City"}</p>
+                            <p className="text-lg font-bold text-white">{getLocString(magazineWiki.title, "vi")}</p>
+                          </div>
+                          <div>
+                            <p className="text-[10px] text-slate-500 uppercase font-black tracking-widest mb-1">{lang === "vi" ? "Phân khúc" : "Budget"}</p>
+                            <p className="text-lg font-bold text-indigo-400 uppercase tracking-widest">
+                               {activeTrip?.budgetLevel || "Medium"}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-4">
+                         <div className="flex items-center gap-3">
+                           <CheckCircle2 className="w-5 h-5 text-emerald-400" />
+                           <span className="text-xs font-bold text-slate-300">{lang === "vi" ? "Đã được xác thực dữ liệu" : "Verified Data Source"}</span>
+                         </div>
+                         <div className="flex items-center gap-3">
+                           <Clock className="w-5 h-5 text-amber-400" />
+                           <span className="text-xs font-bold text-slate-300">{lang === "vi" ? "Cập nhật 04/2026" : "Updated April 2026"}</span>
+                         </div>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Footer Decor */}
+                <div className="h-20 bg-white/5 border-t border-white/5 flex items-center justify-between px-12 md:px-20">
+                   <p className="text-[10px] font-black text-slate-600 uppercase tracking-[0.4em]">OPTIROUTE AI · RESEARCH PROJECT</p>
+                   <p className="text-[10px] font-bold text-slate-600">PAGE 01 / 01</p>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

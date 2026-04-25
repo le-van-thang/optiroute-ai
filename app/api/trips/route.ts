@@ -39,7 +39,7 @@ export async function POST(req: Request) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { title, city, startDate, endDate, budget } = await req.json();
+    const { title, city, startDate, endDate, budget, intent, cityWiki, estimatedBudget } = await req.json();
 
     if (!title) {
       return NextResponse.json({ error: "Title is required" }, { status: 400 });
@@ -55,6 +55,9 @@ export async function POST(req: Request) {
       data: {
         title,
         city,
+        intent,
+        cityWiki,
+        estimatedBudget: estimatedBudget ? parseFloat(estimatedBudget) : null,
         startDate: startDate ? new Date(startDate) : null,
         endDate: endDate ? new Date(endDate) : null,
         budget: budget ? parseFloat(budget) : null,

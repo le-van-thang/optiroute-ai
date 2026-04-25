@@ -18,17 +18,20 @@ function getApiKeys(): string[] {
   return keys;
 }
 
-// Check if an error is a quota/rate-limit/overload error
-function isQuotaError(error: unknown): boolean {
+// Check if an error is retryable (quota, transient server error, or access denied for specific key)
+function isRetryableError(error: unknown): boolean {
   const msg = (error instanceof Error ? error.message : String(error)).toLowerCase();
   return (
     msg.includes("429") ||
     msg.includes("503") ||
+    msg.includes("500") ||
+    msg.includes("403") || // Critical fix: Rotate if key is denied
     msg.includes("resource_exhausted") ||
     msg.includes("quota") ||
     msg.includes("rate limit") ||
     msg.includes("service unavailable") ||
-    msg.includes("high demand")
+    msg.includes("high demand") ||
+    msg.includes("denied access")
   );
 }
 
@@ -100,14 +103,14 @@ export async function generateWithRotation(params: GeminiRequest): Promise<strin
     } catch (error: unknown) {
       lastError = error instanceof Error ? error : new Error(String(error));
 
-      if (isQuotaError(error)) {
-        console.warn(`[Gemini Rotation] ${keyLabel} bị rate limit/overload → nghỉ 1s rồi thử key tiếp theo...`);
+      if (isRetryableError(error)) {
+        console.warn(`[Gemini Rotation] ${keyLabel} gặp lỗi retryable (${lastError.message}) → thử key tiếp theo...`);
         // Add a small delay to avoid hammering the API
-        await new Promise(resolve => setTimeout(resolve, 1000));
+        await new Promise(resolve => setTimeout(resolve, 500));
         continue;
       }
 
-      // Non-quota error (auth, bad request, etc.) — rethrow immediately
+      // Non-retryable error (bad request, etc.) — rethrow immediately
       throw error;
     }
   }
