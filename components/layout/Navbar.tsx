@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
+import { useToast } from "@/components/providers/ToastProvider";
 import { BankSettingsModal } from "@/components/split-bill/BankSettingsModal";
 
 interface NotificationData {
@@ -27,6 +28,7 @@ export function Navbar() {
   const { data: session, status, update } = useSession();
   const pathname = usePathname();
   const { lang, setLang, t } = useLang();
+  const { showToast } = useToast();
   
   const navT = t.navbar;
 
@@ -44,6 +46,7 @@ export function Navbar() {
   };
   const [showBankModal, setShowBankModal] = useState(false);
   const [supportEmail, setSupportEmail] = useState<string>("");
+  const [siteName, setSiteName] = useState<string>("OptiRoute AI");
   const [verifiedRole, setVerifiedRole] = useState<string | null>(session?.user?.role || null);
   
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -57,6 +60,7 @@ export function Navbar() {
         if (res.ok) {
           const data = await res.json();
           if (data.supportEmail) setSupportEmail(data.supportEmail);
+          if (data.siteName) setSiteName(data.siteName);
         }
       } catch (err) {}
     };
@@ -122,28 +126,46 @@ export function Navbar() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
+  // Reusable notification fetcher
+  const fetchNotifications = async () => {
+    if (!session?.user) return;
+    try {
+      const res = await fetch("/api/notifications").catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        setNotifications(data.notifications || []);
+        setUnreadCount(data.unreadCount || 0);
+      }
+    } catch (err) {}
+  };
+
   // Poll notifications
   useEffect(() => {
     if (!session?.user) return;
-    
-    const fetchNotifications = async () => {
-      if (!session?.user) return;
-      try {
-        const res = await fetch("/api/notifications").catch(() => null);
-        if (res && res.ok) {
-          const data = await res.json();
-          setNotifications(data.notifications || []);
-          setUnreadCount(data.unreadCount || 0);
-        }
-      } catch (err) {
-        // Silent catch for network jitter or server restarts
-      }
-    };
-
     fetchNotifications();
     const interval = setInterval(fetchNotifications, 30000); // 30s polling
     return () => clearInterval(interval);
   }, [session]);
+
+  // Real-time Global Broadcasts
+  useEffect(() => {
+    const client = pusherClient;
+    if (client) {
+      const channel = client.subscribe("global-notifications");
+      
+      channel.bind("new-broadcast", (data: any) => {
+        // Instant sync with DB
+        fetchNotifications();
+        
+        // Show a premium system-wide toast
+        showToast(data.message, "info");
+      });
+
+      return () => {
+        client.unsubscribe("global-notifications");
+      };
+    }
+  }, [session?.user?.id]);
 
   // ============================================
   // Real-time Presence Engine (Heartbeat System)
@@ -250,7 +272,13 @@ export function Navbar() {
               href={session ? "/dashboard" : "/"} 
               className="font-bold text-xl tracking-tight text-white flex items-center gap-1"
             >
-              OptiRoute <span className="text-indigo-400">AI</span>
+              {siteName.includes(" ") ? (
+                <>
+                  {siteName.split(" ")[0]} <span className="text-indigo-400">{siteName.split(" ").slice(1).join(" ")}</span>
+                </>
+              ) : (
+                siteName
+              )}
             </Link>
           </div>
 

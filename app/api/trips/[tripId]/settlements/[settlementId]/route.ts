@@ -43,6 +43,21 @@ export async function PATCH(req: Request, { params }: RouteContext) {
       data: { status: "COMPLETED" },
     });
 
+    // Tier 3: Tự động đồng bộ với lịch sử chi tiêu
+    // Khi một giao dịch thanh toán nợ tổng được xác nhận, tất cả các phần nợ (shares) 
+    // của người trả trong chuyến đi này sẽ được đánh dấu là đã thanh toán.
+    await prisma.expenseShare.updateMany({
+      where: {
+        userId: settlement.payerId,
+        expense: {
+          tripId: tripId
+        }
+      },
+      data: {
+        settlementPaid: true
+      }
+    });
+
     // Notify payer
     await prisma.notification.create({
       data: {

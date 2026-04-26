@@ -20,6 +20,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [newReportAlert, setNewReportAlert] = useState<string | null>(null);
+  const [siteName, setSiteName] = useState<string>("OptiAdmin");
 
   const [isValidated, setIsValidated] = useState<boolean | null>(null);
 
@@ -50,8 +51,35 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       }
     };
 
+    const fetchSiteName = async () => {
+      try {
+        const res = await fetch("/api/system/status");
+        if (res.ok) {
+          const data = await res.json();
+          if (data.siteName) setSiteName(data.siteName);
+        }
+      } catch (err) {}
+    };
+
     verifyRole();
+    fetchSiteName();
   }, [session, status, router]);
+
+  // Heartbeat để cập nhật trạng thái Online cho Admin
+  useEffect(() => {
+    if (!session) return;
+    
+    const triggerHeartbeat = async () => {
+      try {
+        await fetch("/api/user/heartbeat", { method: "PATCH" });
+      } catch (err) {}
+    };
+
+    triggerHeartbeat(); 
+    const heartbeatInterval = setInterval(triggerHeartbeat, 60000); 
+    
+    return () => clearInterval(heartbeatInterval);
+  }, [session]);
 
   // Lắng nghe báo cáo Real-time
   useEffect(() => {
@@ -114,7 +142,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               animate={{ opacity: 1 }}
               className="font-black uppercase tracking-tighter text-lg bg-clip-text text-transparent bg-gradient-to-r from-white to-slate-400"
             >
-              OptiAdmin
+              {siteName}
             </motion.span>
           )}
         </div>

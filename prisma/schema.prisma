@@ -55,6 +55,7 @@ model User {
   inventory         Json?           @default("[]")
   lastActiveTripId  String?
   lastActiveAt      DateTime        @default(now())
+  lastCity          String?         @default("Đang xác định...")
 
   // Phase 24: Real 2FA (Real Email/SMS)
   verificationCode  String?

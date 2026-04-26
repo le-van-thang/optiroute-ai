@@ -17,7 +17,7 @@ export async function DELETE(
     const messageId = resolvedParams.id;
 
     const { searchParams } = new URL(req.url);
-    const deleteType = searchParams.get("type") || "everyone"; // "me" | "everyone"
+    const deleteType = searchParams.get("type") || searchParams.get("scope") || "everyone"; // "me" | "everyone"
 
     // Tìm tin nhắn để lấy thông tin conversation và người nhận
     const message = await prisma.message.findUnique({

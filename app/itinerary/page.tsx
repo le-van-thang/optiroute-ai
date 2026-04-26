@@ -33,6 +33,8 @@ import {
   VolumeX,
   Wand2,
   X,
+  Gamepad2,
+  Ticket,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 import { useSearchParams } from "next/navigation";
@@ -93,7 +95,7 @@ interface Activity {
   time?: string;
   place?: LocalizedString | string;
   place_name?: LocalizedString | string;
-  category?: "hotel" | "restaurant" | "attraction" | "gas_station";
+  category?: "hotel" | "restaurant" | "attraction" | "entertainment" | "gas_station";
   description: LocalizedString | string;
   tip?: LocalizedString | string;
   lat?: number;
@@ -136,6 +138,8 @@ interface LegInfo {
 
 const MAPBOX_TOKEN = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN || "";
 
+type LocalFilterType = "all" | "restaurant" | "hotel" | "attraction" | "entertainment";
+
 const getLocString = (
   val?: string | LocalizedString,
   lang: string = "vi",
@@ -173,16 +177,18 @@ const PlaceItem = ({
   const categoryColors: Record<string, string> = {
     hotel: "text-purple-400 bg-purple-500/10 border-purple-500/20",
     restaurant: "text-orange-400 bg-orange-500/10 border-orange-500/20",
-    attraction: "text-blue-400 bg-blue-500/10 border-blue-500/20",
+    attraction: "text-teal-400 bg-teal-500/10 border-teal-500/20",
+    entertainment: "text-sky-400 bg-sky-500/10 border-sky-500/20",
     gas_station: "text-yellow-400 bg-yellow-500/10 border-yellow-500/20",
   };
   const catStyle =
     categoryColors[act.category || "attraction"] || categoryColors.attraction;
   const catLabel: Record<string, Record<string, string>> = {
-    hotel: { vi: "Khách sạn", en: "Hotel" },
-    restaurant: { vi: "Nhà hàng", en: "Restaurant" },
-    attraction: { vi: "Điểm tham quan", en: "Attraction" },
-    gas_station: { vi: "Trạm xăng", en: "Gas station" },
+    hotel: { vi: "🏨 Khách sạn", en: "🏨 Hotel" },
+    restaurant: { vi: "🍴 Nhà hàng", en: "🍴 Restaurant" },
+    attraction: { vi: "📸 Tham quan", en: "📸 Attraction" },
+    entertainment: { vi: "🎡 Vui chơi", en: "🎡 Fun" },
+    gas_station: { vi: "⛽ Trạm xăng", en: "⛽ Gas station" },
   };
   return (
     <div
@@ -361,9 +367,7 @@ export default function ItineraryPage() {
   const [journeyActive, setJourneyActive] = useState(false);
   const [journeyStepIdx, setJourneyStepIdx] = useState(0); // index in flat session list
   const [journeyNotif, setJourneyNotif] = useState<string | null>(null);
-  const [localFilterType, setLocalFilterType] = useState<
-    "all" | "restaurant" | "hotel" | "attraction"
-  >("all");
+  const [localFilterType, setLocalFilterType] = useState<LocalFilterType>("all");
   
   const [itineraryHistory, setItineraryHistory] = useState<any[]>([]);
   const [searchTab, setSearchTab] = useState<"ai" | "local" | "history">("ai");
@@ -906,6 +910,7 @@ export default function ItineraryPage() {
         restaurant: "poi",
         hotel: "poi",
         attraction: "poi,landmark",
+        entertainment: "poi,landmark",
       };
       const poiType = typeMap[localFilterType] || "poi,landmark";
 
@@ -914,6 +919,7 @@ export default function ItineraryPage() {
         restaurant: query.toLowerCase().includes("nhà hàng") || query.toLowerCase().includes("ăn") ? query : `nhà hàng ${query}`,
         hotel: query.toLowerCase().includes("khách sạn") || query.toLowerCase().includes("homestay") ? query : `khách sạn ${query}`,
         attraction: query.toLowerCase().includes("du lịch") || query.toLowerCase().includes("tham quan") ? query : `điểm tham quan ${query}`,
+        entertainment: query.toLowerCase().includes("vui chơi") || query.toLowerCase().includes("giải trí") ? query : `địa điểm vui chơi ${query}`,
         all: query,
       };
       const searchQuery = filterKeyword[localFilterType] || query;
@@ -932,7 +938,7 @@ export default function ItineraryPage() {
         lat: f.center[1],
         lng: f.center[0],
         category:
-          localFilterType === "all" ? "attraction" : (localFilterType as any),
+          localFilterType === "all" ? "attraction" : localFilterType,
       }));
 
       setLocalResults(results);
@@ -1138,9 +1144,11 @@ export default function ItineraryPage() {
           const km = (leg.distance / 1000).toFixed(1);
           let rawSecs = leg.duration;
           
-          // Realistic buffers to match Google Maps' conservative estimates
+          // Realistic buffers to match Google Maps' conservative estimates in Vietnam
           if (transportMode === "walking") rawSecs *= 1.25; // Mapbox is too optimistic for walking
           if (transportMode === "cycling") rawSecs *= 1.15;
+          if (transportMode === "driving") rawSecs *= 1.2;  // Buffer for traffic/stops
+          if (transportMode === "motorcycle") rawSecs *= 1.3; // Motorcycles have lower speed limits on highways
           
           const mins = Math.round(rawSecs / 60);
           return {
@@ -1571,10 +1579,11 @@ export default function ItineraryPage() {
                 {(
                   [
                     { key: "all", viLabel: "Tất cả", enLabel: "All" },
-                    { key: "attraction", viLabel: "🌄 Du lịch", enLabel: "🌄 Attraction" },
-                    { key: "restaurant", viLabel: "🍻 Nhà hàng", enLabel: "🍻 Restaurant" },
+                    { key: "attraction", viLabel: "📸 Tham quan", enLabel: "📸 Attraction" },
+                    { key: "restaurant", viLabel: "🍴 Nhà hàng", enLabel: "🍴 Restaurant" },
                     { key: "hotel", viLabel: "🏨 Khách sạn", enLabel: "🏨 Hotel" },
-                  ] as { key: "all" | "attraction" | "restaurant" | "hotel"; viLabel: string; enLabel: string; }[]
+                    { key: "entertainment", viLabel: "🎡 Vui chơi", enLabel: "🎡 Fun" },
+                  ] as { key: LocalFilterType; viLabel: string; enLabel: string }[]
                 ).map((f) => (
                   <button
                     key={f.key}
