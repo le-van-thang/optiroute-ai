@@ -49,8 +49,13 @@ export function MaintenanceWrapper({ children, adminRole }: MaintenanceWrapperPr
     pathname.startsWith("/api") ||
     pathname.startsWith("/admin");
 
+  useEffect(() => {
+    if (isMaintenance && !isAdmin && !isExcludedPage) {
+      router.push("/maintenance");
+    }
+  }, [isMaintenance, isAdmin, isExcludedPage, router]);
+
   if (isMaintenance && !isAdmin && !isExcludedPage) {
-    router.push("/maintenance");
     return null;
   }
 

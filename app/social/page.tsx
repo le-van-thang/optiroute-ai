@@ -159,6 +159,10 @@ export default function SocialHub() {
       fetchConversations();
     });
 
+    channel.bind("message-deleted", (data: { messageId: string }) => {
+      setMessages(prev => prev.filter(m => m.id !== data.messageId));
+    });
+
     return () => {
       if (pusherClient) pusherClient.unsubscribe(channelName);
     };
@@ -366,7 +370,7 @@ export default function SocialHub() {
 
   const confirmDeleteMessage = async (msgId: string, scope: 'me' | 'everyone') => {
     try {
-      const res = await fetch(`/api/chat/messages/${msgId}?scope=${scope}`, { method: "DELETE" });
+      const res = await fetch(`/api/chat/messages/${msgId}?type=${scope}`, { method: "DELETE" });
       if (res.ok) {
         setMessages(prev => prev.filter(m => m.id !== msgId));
         setDeletingMessageId(null);
@@ -792,7 +796,9 @@ export default function SocialHub() {
                       <div className={`max-w-[70%] flex flex-col ${isMine ? 'items-end' : 'items-start'} group relative`}>
                         <div className={`absolute top-1/2 -translate-y-1/2 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-all ${isMine ? 'right-full mr-3' : 'left-full ml-3'}`}>
                            <button onClick={() => handleReply(msg)} className="p-1.5 rounded-full bg-slate-900 border border-white/10 text-slate-500 hover:text-white hover:bg-indigo-600"><Reply className="w-3.5 h-3.5" /></button>
-                           <button onClick={() => handleCopyMessage(msg.id, msg.content)} className="p-1.5 rounded-full bg-slate-900 border border-white/10 text-slate-500 hover:text-white hover:bg-emerald-600"><Copy className="w-3.5 h-3.5" /></button>
+                           <button onClick={() => handleCopyMessage(msg.id, msg.content)} className="p-1.5 rounded-full bg-slate-900 border border-white/10 text-slate-500 hover:text-white hover:bg-emerald-600">
+                             {copiedMessageId === msg.id ? <Check className="w-3.5 h-3.5 text-emerald-500" /> : <Copy className="w-3.5 h-3.5" />}
+                           </button>
                            <button onClick={() => setDeletingMessageId(msg.id)} className="p-1.5 rounded-full bg-slate-900 border border-white/10 text-slate-500 hover:text-white hover:bg-red-600"><Trash2 className="w-3.5 h-3.5" /></button>
                         </div>
                         <div className={`shadow-xl transition-all ${msg.type === 'IMAGE' ? 'p-0 bg-transparent overflow-hidden' : (isMine ? 'px-4 py-2.5 bg-indigo-600 text-white rounded-2xl rounded-br-md' : 'px-4 py-2.5 bg-slate-800 text-slate-100 rounded-2xl rounded-bl-md border border-white/5')}`}>

@@ -39,6 +39,7 @@ export async function GET(req: Request, { params }: RouteContext) {
             bankCode: true,
             bankAccountNumber: true,
             bankAccountName: true,
+            image: true,
           },
         },
       },
@@ -76,12 +77,18 @@ export async function POST(req: Request, { params }: RouteContext) {
       return NextResponse.json({ error: "Forbidden: Only leader can add members" }, { status: 403 });
     }
 
-    // Tìm user muốn thêm (theo email hoặc tên chính xác)
+    // Chuẩn hóa identifier (xóa # nếu có)
+    let cleanIdentifier = identifier;
+    if (identifier.startsWith("#")) {
+      cleanIdentifier = identifier.substring(1);
+    }
+
+    // Tìm user muốn thêm (chỉ cho phép Email hoặc ID ngắn để đảm bảo chính xác)
     const userToAdd = await prisma.user.findFirst({
       where: {
         OR: [
-          { email: identifier },
-          { name: identifier }
+          { email: { equals: cleanIdentifier, mode: "insensitive" } },
+          { id: { endsWith: cleanIdentifier.toLowerCase() } }
         ]
       }
     });
@@ -116,6 +123,7 @@ export async function POST(req: Request, { params }: RouteContext) {
             bankCode: true,
             bankAccountNumber: true,
             bankAccountName: true,
+            image: true,
           }
         }
       }
@@ -124,6 +132,50 @@ export async function POST(req: Request, { params }: RouteContext) {
     return NextResponse.json(newMember);
   } catch (error: any) {
     console.error("Error adding member:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+
+// DELETE /api/trips/[tripId]/members — Xóa thành viên khỏi trip
+export async function DELETE(req: Request, { params }: RouteContext) {
+  try {
+    const { tripId } = await params;
+    const { searchParams } = new URL(req.url);
+    const userIdToRemove = searchParams.get("userId");
+
+    if (!userIdToRemove) return NextResponse.json({ error: "User ID is required" }, { status: 400 });
+
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.email) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+    const sessionUser = await prisma.user.findUnique({ where: { email: session.user.email } });
+    if (!sessionUser) return NextResponse.json({ error: "User not found" }, { status: 404 });
+
+    // Kiểm tra quyền: Chỉ Leader mới được xóa người khác, hoặc Member tự rời khỏi nhóm
+    const myMembership = await prisma.groupMember.findUnique({
+      where: { tripId_userId: { tripId, userId: sessionUser.id } }
+    });
+
+    if (!myMembership) return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+
+    if (myMembership.role !== "LEADER" && sessionUser.id !== userIdToRemove) {
+      return NextResponse.json({ error: "Forbidden: Only leader can remove others" }, { status: 403 });
+    }
+
+    // Không cho phép xóa Leader (phải chuyển quyền hoặc xóa cả trip)
+    const targetMembership = await prisma.groupMember.findUnique({
+      where: { tripId_userId: { tripId, userId: userIdToRemove } }
+    });
+    if (targetMembership?.role === "LEADER" && sessionUser.id === userIdToRemove) {
+      return NextResponse.json({ error: "Leader cannot leave without transferring ownership" }, { status: 400 });
+    }
+
+    await prisma.groupMember.delete({
+      where: { tripId_userId: { tripId, userId: userIdToRemove } }
+    });
+
+    return NextResponse.json({ success: true });
+  } catch (error: any) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 }

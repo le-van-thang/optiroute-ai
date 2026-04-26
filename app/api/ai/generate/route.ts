@@ -11,8 +11,6 @@ import crypto from "crypto";
 
 const prisma = new PrismaClient();
 
-// --- HELPERS (Phải có ở đây hoặc export từ lib) ---
-
 /**
  * Geocodes a place name using Mapbox, strictly filtered by a BBox if provided.
  */
@@ -54,6 +52,7 @@ function createActivityObj(item: any, time: string) {
     lat: item.lat,
     lng: item.lng,
     tip: item.tip,
+    geocoded: item.geocoded,
     completed: false
   };
 }
@@ -73,57 +72,76 @@ export async function POST(req: Request) {
     // --- STEP 1: Normalize & Check Cache ---
     const normalized = normalizePrompt(prompt);
     const dayMatch = prompt.match(/(\d+)\s*(ngày|day|d)/i);
-    const requestedDays = dayMatch ? parseInt(dayMatch[1]) : 1;
+    const requestedDays = dayMatch ? Math.min(parseInt(dayMatch[1]), 7) : 1; // Cap at 7 days
     
-    const promptHash = crypto.createHash("sha256").update(normalized + "_v5").digest("hex");
+    // v6: bust old cache that had truncation issues
+    const promptHash = crypto.createHash("sha256").update(normalized + `_v6_${requestedDays}d`).digest("hex");
 
     const cached = await prisma.itineraryCache.findUnique({
       where: { promptHash }
     });
 
     if (cached) {
-      console.log(`[Cache Hit] Serving v5 data for: ${normalized}`);
+      console.log(`[Cache Hit v6] Serving data for: ${normalized}`);
       return NextResponse.json({ data: cached.intentData });
     }
 
     const userLocationHint = userLat && userLng 
-        ? `The user's current GPS location is: latitude ${userLat}, longitude ${userLng}.`
+        ? `User GPS: lat=${userLat}, lng=${userLng}.`
         : "";
 
-    // --- STEP 3: Research-Grade Prompting (Pha 6.5: Ultra-Stable) ---
-    const systemInstruction = `You are a professional Travel Journalist.
-    MANDATORY Rules:
-    1. Return ONLY raw JSON. NO markdown.
-    2. Density: Provide EXACTLY 9 items per day (3 per session). Total items = 9 * ${requestedDays}.
-    3. Dragon Bridge Tip: For Sat/Sun, MUST include: "Xem phun lửa và nước lúc 21h00".
-    4. Magazine: Provide 4 detailed blocks (Intro, Hotels, Food, Landmarks). MUST be min 60 words each.
-    5. Activities: BE CONCISE (max 25 words) to avoid truncation and fit the 45s limit.
+    // --- STEP 2: Smart Prompt - Compact but rich ---
+    // Key fix: reduce magazine to avoid truncation, ask for per-day structure
+    const ITEMS_PER_DAY = 9; // 3 morning + 3 afternoon + 3 evening
+    const totalItems = ITEMS_PER_DAY * requestedDays;
 
-    Schema:
-    {
-      "city": "string",
-      "days_count": ${requestedDays},
-      "magazine_wiki": { 
-        "title": {"vi": "...", "en": "..."}, 
-        "content_blocks": [{"heading": {"vi": "...", "en": "..."}, "body": {"vi": "...", "en": "..."}}] 
-      },
-      "suggested_places": [
-        { "place_name": {"vi": "...", "en": "..."}, "category": "attraction", "description": {"vi": "...", "en": "..."}, "tip": {"vi": "...", "en": "..."} }
-      ]
-    }`;
+    const systemInstruction = `You are an expert Vietnamese travel journalist. Respond ONLY in raw JSON (no markdown).
 
-    console.log(`[Regional Mode] Calling Gemini API for: ${normalized}`);
+RULES:
+- "city": main destination city name (string)
+- "days_count": ${requestedDays}
+- "magazine_wiki": short intro (1 block, max 40 words per section, vi+en)
+- "suggested_places": EXACTLY ${totalItems} items total (${ITEMS_PER_DAY} per day × ${requestedDays} days)
+
+DIVERSITY PER DAY (strict):
+- Morning (items 0-2): 2 attractions + 1 restaurant (breakfast/brunch)
+- Afternoon (items 3-5): 1 attraction + 1 entertainment + 1 restaurant (lunch)
+- Evening (items 6-8): 1 hotel OR famous night spot + 1 entertainment/bar/walking area + 1 restaurant (dinner)
+
+CATEGORY: must be one of: attraction | restaurant | hotel | entertainment
+
+INTELLIGENT SUGGESTIONS:
+- Only suggest places WITHIN the destination city/province (NOT neighboring provinces)
+- Evening: if no beach → suggest night market, local bar, night walk, live music cafe
+- Evening: if beach exists → suggest sunset beach walk, seafood dinner, night swimming area
+- Always include 1 hotel recommendation per day group
+- Tips must be actionable and local (max 20 words)
+- Descriptions: vivid, traveler-friendly (max 30 words)
+
+JSON Schema:
+{
+  "city": "string",
+  "days_count": ${requestedDays},
+  "magazine_wiki": {
+    "title": {"vi": "...", "en": "..."},
+    "content_blocks": [{"heading": {"vi": "...", "en": "..."}, "body": {"vi": "...", "en": "..."}}]
+  },
+  "suggested_places": [
+    {"place_name": {"vi": "...", "en": "..."}, "category": "attraction|restaurant|hotel|entertainment", "description": {"vi": "...", "en": "..."}, "tip": {"vi": "...", "en": "..."}}
+  ]
+}`;
+
+    console.log(`[AI Generate v6] ${requestedDays} days, ${totalItems} places for: ${normalized}`);
     const responseText = await generateWithRotation({
       systemInstruction: { role: "user", parts: [{ text: systemInstruction }] },
-      message: `Prompt: ${prompt}. ${userLocationHint}`,
+      message: `Trip request: "${prompt}". ${userLocationHint} Generate a ${requestedDays}-day itinerary with ${totalItems} places total.`,
     });
 
     let leanData;
     try {
-      // Phase 6.5: Advanced Fault-Tolerant JSON extraction
       let cleanJson = responseText.replace(/```json/g, "").replace(/```/g, "").trim();
       
-      // Fix unclosed strings first
+      // Advanced fault-tolerant JSON repair
       const quoteCount = (cleanJson.match(/"/g) || []).length;
       if (quoteCount % 2 !== 0) cleanJson += '"';
 
@@ -137,43 +155,56 @@ export async function POST(req: Request) {
 
       leanData = JSON.parse(cleanJson);
     } catch (e) {
-      console.error("[JSON Fix Fail]:", responseText);
-      return NextResponse.json({ error: "AI response was truncated." }, { status: 500 });
+      console.error("[JSON Fix Fail]:", responseText.substring(0, 500));
+      return NextResponse.json({ error: "AI response was truncated. Please try again." }, { status: 500 });
+    }
+
+    // Validate we got at least some places
+    const rawPlaces = leanData.suggested_places || [];
+    if (rawPlaces.length === 0) {
+      return NextResponse.json({ error: "AI returned no places. Please try again." }, { status: 500 });
     }
 
     const targetCity = leanData.city || "Unknown City";
-    const cityRes = await geocodePlace(targetCity, lang, 0, 0, userLat, userLng);
+    // Phase 20 Fix: Geocode destination city WITHOUT user proximity to avoid Da Nang bias
+    const cityRes = await geocodePlace(targetCity, lang, 0, 0); 
     const anchorLat = cityRes.lat || userLat || 0;
     const anchorLng = cityRes.lng || userLng || 0;
 
-    const bbox = [anchorLng - 0.45, anchorLat - 0.45, anchorLng + 0.45, anchorLat + 0.45];
+    // Wider bbox for provincial searches (e.g., Gia Lai is large)
+    const bboxRadius = 1.2;
+    const bbox = [anchorLng - bboxRadius, anchorLat - bboxRadius, anchorLng + bboxRadius, anchorLat + bboxRadius];
 
     const geocodedPlaces: any[] = [];
     const seenCoords = new Set<string>();
 
-    for (const p of (leanData.suggested_places || [])) {
+    for (const p of rawPlaces) {
       const rawName = typeof p.place_name === "object" ? (p.place_name.vi || p.place_name.en) : p.place_name;
       const baseName = (rawName || "").split(/ và | and | & /i)[0].trim();
       if (!baseName) continue;
       
-      let res = await geocodePlace(baseName, lang, 0, 0, anchorLat, anchorLng, bbox);
+      // Try with city suffix first for accuracy
+      let res = await geocodePlace(`${baseName}, ${targetCity}`, lang, 0, 0, anchorLat, anchorLng, bbox);
+      
+      // If still too far from anchor, try without city suffix
       const distFromAnchor = calculateHaversine(res.lat, res.lng, anchorLat, anchorLng);
-      if (distFromAnchor > 50) {
-          res = await geocodePlace(`${baseName}, ${targetCity}`, lang, 0, 0, anchorLat, anchorLng, bbox);
+      if (distFromAnchor > 80) {
+        res = await geocodePlace(baseName, lang, 0, 0, anchorLat, anchorLng, bbox);
       }
 
-      const coordKey = `${res.lat.toFixed(4)},${res.lng.toFixed(4)}`;
+      const coordKey = `${res.lat.toFixed(3)},${res.lng.toFixed(3)}`;
       if (!seenCoords.has(coordKey)) {
-          geocodedPlaces.push({ ...p, lat: res.lat, lng: res.lng, geocoded: res.verified });
-          seenCoords.add(coordKey);
+        geocodedPlaces.push({ ...p, lat: res.lat, lng: res.lng, geocoded: res.verified });
+        seenCoords.add(coordKey);
       }
     }
 
+    // TSP sort per-day group to keep days coherent
     const sortedPlaces = sortPlacesTSP(geocodedPlaces, { lat: anchorLat, lng: anchorLng });
 
     let totalDist = 0;
     for (let i = 0; i < sortedPlaces.length - 1; i++) {
-        totalDist += calculateHaversine(sortedPlaces[i].lat, sortedPlaces[i].lng, sortedPlaces[i+1].lat, sortedPlaces[i+1].lng);
+      totalDist += calculateHaversine(sortedPlaces[i].lat, sortedPlaces[i].lng, sortedPlaces[i+1].lat, sortedPlaces[i+1].lng);
     }
 
     const budget = calculateBudgetDeterministically({
@@ -185,13 +216,14 @@ export async function POST(req: Request) {
       activitiesCount: sortedPlaces.length
     });
 
-    const finalDays = distributeToSessions(sortedPlaces.map((p, idx) => {
-      const times = ["08:00", "14:00", "19:00"];
-      return createActivityObj(p, times[idx % 3]);
-    }));
+    // Distribute to sessions - engine now handles variable item counts
+    const finalDays = distributeToSessions(sortedPlaces.map((p) => {
+      return createActivityObj(p, "00:00"); // Time reassigned by distributeToSessions
+    }), requestedDays);
     
     const finalResult = {
       ...leanData,
+      days_count: requestedDays,
       days: finalDays,
       cost_breakdown: budget,
       total_estimated_cost: budget.total,
@@ -201,7 +233,6 @@ export async function POST(req: Request) {
     const expiresAt = new Date();
     expiresAt.setDate(expiresAt.getDate() + 30);
 
-    // FIX: Đồng bộ với schema.prisma (query, city, intentData)
     await prisma.itineraryCache.upsert({
       where: { promptHash },
       update: { intentData: finalResult as any, expiresAt },

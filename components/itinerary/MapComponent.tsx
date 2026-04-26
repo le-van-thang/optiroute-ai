@@ -1,5 +1,5 @@
 "use client";
-
+import mapboxgl from "mapbox-gl";
 import React, { useMemo, useRef, useState, useEffect } from "react";
 import Map, { Marker, NavigationControl, Source, Layer, GeolocateControl } from "react-map-gl/mapbox";
 import type { MapRef, LayerProps } from "react-map-gl/mapbox";
@@ -7,13 +7,13 @@ import type { FeatureCollection } from "geojson";
 import "mapbox-gl/dist/mapbox-gl.css";
 import { motion, AnimatePresence } from "framer-motion";
 import { useLang } from "@/components/providers/LangProvider";
-import { Layers, MapPin, Plus, Minus, Bed, Utensils, Camera, Fuel } from "lucide-react";
+import { Layers, MapPin, Plus, Minus, Bed, Utensils, Camera, Fuel, Gamepad2, Ticket } from "lucide-react";
 
 interface Coordinate {
   lat: number;
   lng: number;
   place: string;
-  category?: "hotel" | "restaurant" | "attraction" | "gas_station" | "user" | "target";
+  category?: "hotel" | "restaurant" | "attraction" | "entertainment" | "gas_station" | "user" | "target";
 }
 
 interface MapProps {
@@ -125,12 +125,35 @@ export default function MapComponent({
   const { lang, t } = useLang();
   const ml = t.map;
 
+  // ─── Automatic Fit Bounds ───
+  useEffect(() => {
+    if (locations.length > 0 && mapRef.current) {
+      const map = mapRef.current.getMap();
+      if (!map) return;
+
+      const bounds = new mapboxgl.LngLatBounds();
+      locations.forEach((loc) => {
+        if (loc.lng && loc.lat) bounds.extend([loc.lng, loc.lat]);
+      });
+
+      if (userLocation) {
+        bounds.extend([userLocation.lng, userLocation.lat]);
+      }
+
+      map.fitBounds(bounds, {
+        padding: { top: 80, bottom: 80, left: 450, right: 80 }, // Leave room for the sidebar
+        duration: 2000,
+        maxZoom: 16
+      });
+    }
+  }, [locations, userLocation]);
+
   // Navigation Camera Tracking Logic
   useEffect(() => {
     // We prioritize navFocusPoint for camera centering during navigation
     if (isNavigating && navFocusPoint && mapRef.current) {
       const map = mapRef.current.getMap();
-      if (!map) return; // Safety check for unmounted state
+      if (!map) return;
 
       let bearing = viewState.bearing;
       if (userLocation) {
@@ -160,16 +183,6 @@ export default function MapComponent({
     }
   }, [isNavigating, navFocusPoint, userLocation, activeLocation]);
 
-  // Đồng bộ tâm bản đồ ban đầu
-  React.useEffect(() => {
-    if (locations.length > 0 && !isNavigating) {
-      setViewState((prev) => ({
-        ...prev,
-        latitude: locations[0].lat,
-        longitude: locations[0].lng,
-      }));
-    }
-  }, [locations, isNavigating]);
 
   // Tính khoảng cách từ GPS người dùng đến điểm đầu tiên
   React.useEffect(() => {
@@ -278,6 +291,7 @@ export default function MapComponent({
           const isRestaurant = loc.category === "restaurant";
           const isGasStation = loc.category === "gas_station";
           const isUser = loc.category === "user" || loc.place.includes("Vị trí của bạn") || loc.place.includes("Your location");
+          const isEntertainment = loc.category === "entertainment";
           
           let bgColor = "bg-slate-700";
           let activeBgColor = "bg-indigo-500";
@@ -287,13 +301,17 @@ export default function MapComponent({
             bgColor = "bg-blue-600";
             activeBgColor = "bg-blue-400";
           } else if (isHotel) {
-            bgColor = "bg-purple-600";
+            bgColor = "bg-purple-600"; // GMaps Lodging Style
             activeBgColor = "bg-purple-500";
             Icon = Bed;
           } else if (isRestaurant) {
-            bgColor = "bg-orange-600";
-            activeBgColor = "bg-orange-500";
+            bgColor = "bg-orange-500"; // GMaps Food & Drink Style
+            activeBgColor = "bg-orange-400";
             Icon = Utensils;
+          } else if (isEntertainment) {
+            bgColor = "bg-sky-500"; // GMaps Entertainment Style
+            activeBgColor = "bg-sky-400";
+            Icon = Gamepad2;
           } else if (isGasStation) {
             bgColor = "bg-amber-500";
             activeBgColor = "bg-amber-400";
@@ -302,7 +320,7 @@ export default function MapComponent({
             // attraction (default) - Google Maps red style
             bgColor = "bg-rose-600";
             activeBgColor = "bg-rose-500";
-            Icon = MapPin;
+            Icon = Camera;
           }
 
           return (

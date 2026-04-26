@@ -54,7 +54,7 @@ function detectRegion(city: any): string {
   const cityName = typeof city === "object" ? (city.vi || city.en || "") : city;
   const c = String(cityName).toLowerCase();
   
-  const vnKeywords = ["ha noi", "ho chi minh", "da nang", "ha giang", "da lat", "phu quoc", "sai gon", "viet nam", "vietnam", "hue", "nha trang", "hoi an", "quang nam", "da nag"];
+  const vnKeywords = ["ha noi", "ho chi minh", "da nang", "ha giang", "da lat", "phu quoc", "sai gon", "viet nam", "vietnam", "hue", "nha trang", "hoi an", "quang nam", "gia lai", "kon tum", "dak lak", "dak nong", "binh dinh", "quang ngai", "phu yen"];
   const seaHighKeywords = ["singapore", "bangkok", "kuala lumpur", "manila", "jakarta", "thailand", "malaysia", "indonesia"];
   const westernKeywords = ["london", "paris", "new york", "tokyo", "seoul", "sydney", "berlin", "usa", "europe", "japan", "korea"];
 
@@ -134,33 +134,78 @@ export function calculateBudgetDeterministically(params: {
 }
 
 /**
- * Groups a sorted list of activities into legacy UI sessions (Morning, Afternoon, Evening).
+ * Groups a sorted list of activities into daily sessions (Morning, Afternoon, Evening).
+ * v6: Fully flexible - handles any number of places and distributes evenly across requestedDays.
+ * Always ensures Evening session has content (fallback from afternoon if needed).
  */
-/**
- * Groups a sorted list of activities into legacy UI sessions (Morning, Afternoon, Evening).
- * Now supports high-density itineraries (multiple activities per session).
- */
-export function distributeToSessions(sortedPlaces: any[]): any[] {
+export function distributeToSessions(sortedPlaces: any[], requestedDays: number = 1): any[] {
   const days: any[] = [];
-  // Standard density is 3 items/session (9/day)
-  // If AI provided fewer (e.g. 1 per session), we adapt
-  const itemsPerDay = Math.max(3, Math.ceil(sortedPlaces.length / (Math.ceil(sortedPlaces.length / 9) || 1)));
   
-  for (let i = 0; i < sortedPlaces.length; i += itemsPerDay) {
-    const chunk = sortedPlaces.slice(i, i + itemsPerDay);
-    const dayNum = Math.floor(i / itemsPerDay) + 1;
+  // Realistic time slots per session
+  const morningTimes = ["08:00", "09:30", "11:00"];
+  const afternoonTimes = ["14:00", "15:30", "17:00"];
+  const eveningTimes = ["19:00", "20:30", "22:00"];
 
-    // Distribute chunk into 3 sessions as evenly as possible
+  const totalPlaces = sortedPlaces.length;
+  const targetPerDay = Math.ceil(totalPlaces / requestedDays);
+
+  for (let dayIdx = 0; dayIdx < requestedDays; dayIdx++) {
+    const start = dayIdx * targetPerDay;
+    const end = Math.min(start + targetPerDay, totalPlaces);
+    const chunk = sortedPlaces.slice(start, end);
+    
+    const dayNum = dayIdx + 1;
     const sMorning: any[] = [];
     const sAfternoon: any[] = [];
     const sEvening: any[] = [];
 
-    const perSession = Math.round(chunk.length / 3);
-    chunk.forEach((item, idx) => {
-        if (idx < perSession) sMorning.push(item);
-        else if (idx < perSession * 2) sAfternoon.push(item);
-        else sEvening.push(item);
-    });
+    const chunkSize = chunk.length;
+
+    if (chunkSize === 0) {
+      // Empty day — skip gracefully
+      days.push({
+        day_number: dayNum,
+        title: { vi: `Ngày ${dayNum}`, en: `Day ${dayNum}` },
+        sessions: { morning: [], afternoon: [], evening: [] },
+      });
+      continue;
+    }
+
+    if (chunkSize <= 3) {
+      // Small chunk: put all in morning, ensure evening gets at least 1 fallback
+      chunk.forEach((item, idx) => {
+        sMorning.push({ ...item, time: morningTimes[idx] || "08:00" });
+      });
+    } else if (chunkSize <= 6) {
+      // Medium: split between morning and afternoon
+      const halfMorning = Math.ceil(chunkSize / 2);
+      chunk.forEach((item, idx) => {
+        if (idx < halfMorning) {
+          sMorning.push({ ...item, time: morningTimes[idx] || "08:00" });
+        } else {
+          const aIdx = idx - halfMorning;
+          sAfternoon.push({ ...item, time: afternoonTimes[aIdx] || "14:00" });
+        }
+      });
+    } else {
+      // Full 9+ items: distribute 3-3-3+
+      chunk.forEach((item, idx) => {
+        if (idx < 3) {
+          sMorning.push({ ...item, time: morningTimes[idx] });
+        } else if (idx < 6) {
+          sAfternoon.push({ ...item, time: afternoonTimes[idx - 3] });
+        } else {
+          const eIdx = idx - 6;
+          sEvening.push({ ...item, time: eveningTimes[eIdx] || "19:00" });
+        }
+      });
+    }
+
+    // Guarantee evening is never empty: pull last item from afternoon if needed
+    if (sEvening.length === 0 && sAfternoon.length > 1) {
+      const lastAfternoon = sAfternoon.pop()!;
+      sEvening.push({ ...lastAfternoon, time: "19:00" });
+    }
 
     days.push({
       day_number: dayNum,

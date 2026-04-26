@@ -12,7 +12,7 @@ import {
   CreditCard, Banknote, Info, User, ArrowUpRight, ArrowDownRight,
   TrendingUp, Activity, Split, Download, Share2, Maximize2, Search, CheckCircle2,
   Link2, Copy, Loader2, Eye, ShieldCheck, AlertCircle, Image as ImageIcon,
-  BellRing, Mail
+  BellRing, Mail, UtensilsCrossed, Coffee, Car, Bed, Ticket, ShoppingBag, History as LucideHistory
 } from "lucide-react";
 import { CldUploadWidget } from "next-cloudinary";
 import { BankSettingsModal } from "@/components/split-bill/BankSettingsModal";
@@ -34,6 +34,7 @@ interface Member {
   hasBankInDb?: boolean; // true = bank info exists in DB
   isLeader?: boolean;   // true = trip leader
   isMe?: boolean;
+  image?: string;
 }
 interface DB_Settlement {
   id: string;
@@ -44,6 +45,11 @@ interface DB_Settlement {
   receiptUrl?: string;
   createdAt: string;
 }
+interface ExpenseShare {
+  userId: string;
+  amountOwed: number;
+  settlementPaid: boolean;
+}
 interface Expense {
   id: string;
   name: string;
@@ -52,6 +58,7 @@ interface Expense {
   participants: string[]; // member ids
   createdAt?: string;    // ISO date string
   synced?: boolean;
+  shares?: ExpenseShare[];
 }
 interface Settlement { from: string; to: string; amount: number; }
 interface TripInfo { 
@@ -106,6 +113,14 @@ const MEMBER_COLORS = [
   "bg-indigo-500", "bg-emerald-500", "bg-amber-500",
   "bg-rose-500", "bg-cyan-500", "bg-purple-500", "bg-orange-500"
 ];
+
+const getStableColor = (id: string) => {
+  let hash = 0;
+  for (let i = 0; i < id.length; i++) {
+    hash = id.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  return MEMBER_COLORS[Math.abs(hash) % MEMBER_COLORS.length];
+};
 
 // --- Settle Up Algorithm (Minimum transactions) ---
 function calculateSettlements(members: Member[], expenses: Expense[]): Settlement[] {
@@ -256,6 +271,7 @@ function SplitBillContent() {
   const [codeCopied, setCodeCopied] = useState(false);
   const [loadingTrip, setLoadingTrip] = useState(false);
   const [inviteCodeInput, setInviteCodeInput] = useState("");
+  const [expSearch, setExpSearch] = useState("");
   const [joining, setJoining] = useState(false);
   const [joinSuccess, setJoinSuccess] = useState<string | null>(null);
   const [initialSyncDone, setInitialSyncDone] = useState(false); // Persistence guard
@@ -358,13 +374,14 @@ function SplitBillContent() {
             dbUserId: gm.userId,
             name: gm.user.name || gm.user.email,
             email: gm.user.email, 
-            color: MEMBER_COLORS[i % MEMBER_COLORS.length],
+            color: getStableColor(gm.userId),
             hasBankInDb: !!(gm.user.bankCode && gm.user.bankAccountNumber),
             bankCode: gm.user.bankCode,
             bankAccount: gm.user.bankAccountNumber,
             bankAccountName: gm.user.bankAccountName,
             isLeader: gm.role === "LEADER" || gm.userId === trip.ownerId,
             isMe,
+            image: gm.user.image,
           };
         });
         setMembers(mapped);
@@ -388,9 +405,14 @@ function SplitBillContent() {
           name: e.title,
           amount: e.totalAmount,
           paidBy: e.payerId,
-          participants: e.shares.map((s: any) => s.userId),
+          participants: e.shares?.map((s: any) => s.userId) || [],
           createdAt: e.createdAt,
-          synced: true,
+          shares: e.shares?.map((s: any) => ({
+            userId: s.userId,
+            amountOwed: s.amountOwed,
+            settlementPaid: s.settlementPaid
+          })),
+          synced: true
         }));
         setExpenses(mapped);
       }
@@ -534,8 +556,25 @@ function SplitBillContent() {
     setMembers(prev => prev.map(m => m.id === memberId ? { ...m, bankCode, bankAccount } : m));
   };
 
-  const removeMember = (id: string) => {
+  const removeMember = async (id: string) => {
     if (id === "me") return;
+    
+    if (isMultiplayer && activeTrip) {
+      try {
+        const res = await fetch(`/api/trips/${activeTrip.id}/members?userId=${id}`, { method: "DELETE" });
+        if (!res.ok) {
+          const data = await res.json();
+          showToast(data.error || "Lỗi khi xóa thành viên", "error");
+          return;
+        }
+        showToast(lang === "vi" ? "Đã xóa thành viên khỏi nhóm" : "Member removed from group", "success");
+      } catch (e) {
+        console.error(e);
+        showToast(lang === "vi" ? "Lỗi kết nối" : "Connection error", "error");
+        return;
+      }
+    }
+
     setMembers(prev => prev.filter(m => m.id !== id));
     setExpenses(prev => prev
       .filter(e => e.paidBy !== id)
@@ -601,6 +640,11 @@ function SplitBillContent() {
           amount: saved.totalAmount,
           paidBy: saved.payerId,
           participants: saved.shares.map((s: any) => s.userId),
+          shares: saved.shares.map((s: any) => ({
+            userId: s.userId,
+            amountOwed: s.amountOwed,
+            settlementPaid: s.settlementPaid
+          })),
           synced: true,
         };
         setExpenses(prev => [mapped, ...prev]);
@@ -734,6 +778,12 @@ function SplitBillContent() {
       const updated = await res.json();
       setDbSettlements(prev => prev.map(s => s.id === updated.id ? updated : s));
       
+      // Tier 3: Cập nhật trạng thái 'Đã thanh toán' cho các khoản nợ của người trả
+      setExpenses(prev => prev.map(exp => ({
+        ...exp,
+        shares: exp.shares?.map(s => s.userId === updated.payerId ? { ...s, settlementPaid: true } : s)
+      })));
+      
       // Auto-hide succesful history items after 10s
       setRecentlyCompletedIds(prev => [...prev, updated.id]);
       setTimeout(() => {
@@ -817,6 +867,45 @@ function SplitBillContent() {
     return balance;
   };
 
+  const toggleExpensePayment = async (expenseId: string, userId: string, currentStatus: boolean) => {
+    if (!isMultiplayer || !activeTrip) return;
+    
+    // Optimistic UI update
+    setExpenses(prev => prev.map(exp => {
+      if (exp.id === expenseId && exp.shares) {
+        return {
+          ...exp,
+          shares: exp.shares.map(s => s.userId === userId ? { ...s, settlementPaid: !currentStatus } : s)
+        };
+      }
+      return exp;
+    }));
+
+    try {
+      const res = await fetch(`/api/expenses/${expenseId}/shares`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, settlementPaid: !currentStatus })
+      });
+      if (!res.ok) {
+        throw new Error("Failed to update status");
+      }
+    } catch (e) {
+      console.error(e);
+      showToast(lang === "vi" ? "Lỗi đồng bộ trạng thái" : "Sync failed", "error");
+      // Revert if failed
+      setExpenses(prev => prev.map(exp => {
+        if (exp.id === expenseId && exp.shares) {
+          return {
+            ...exp,
+            shares: exp.shares.map(s => s.userId === userId ? { ...s, settlementPaid: currentStatus } : s)
+          };
+        }
+        return exp;
+      }));
+    }
+  };
+
   const getMember = (id: string) => members.find(m => m.id === id);
   
   // Fintech Logic: Identify Current User for RBAC & Contextual UI
@@ -828,12 +917,33 @@ function SplitBillContent() {
   const youOwe = Math.abs(Math.min(myBalance, 0));
   const owedToYou = Math.max(myBalance, 0);
 
+  const filteredExpenses = useMemo(() => {
+    if (!expSearch) return expenses;
+    const s = expSearch.toLowerCase();
+    return expenses.filter(e => 
+      e.name.toLowerCase().includes(s) || 
+      (e.createdAt && new Date(e.createdAt).toLocaleDateString("vi-VN").includes(s))
+    );
+  }, [expenses, expSearch]);
+
   const chartData = useMemo(() => {
     return members.map((m, i) => {
       const spent = expenses.filter(e => e.paidBy === m.id).reduce((s, e) => s + e.amount, 0);
       return { name: m.name, value: spent, fill: getStandardColor(i) };
     }).filter(d => d.value > 0);
   }, [members, expenses]);
+
+  const getExpenseIcon = (name: string) => {
+    const n = name.toLowerCase();
+    if (n.includes("ăn") || n.includes("uống") || n.includes("phở") || n.includes("cơm") || n.includes("bún")) return <UtensilsCrossed className="w-4 h-4" />;
+    if (n.includes("cafe") || n.includes("cà phê") || n.includes("nước") || n.includes("trà")) return <Coffee className="w-4 h-4" />;
+    if (n.includes("xe") || n.includes("đi lại") || n.includes("taxi") || n.includes("xăng") || n.includes("grab")) return <Car className="w-4 h-4" />;
+    if (n.includes("khách sạn") || n.includes("ngủ") || n.includes("homestay") || n.includes("ks")) return <Bed className="w-4 h-4" />;
+    if (n.includes("vé") || n.includes("tham quan") || n.includes("tour")) return <Ticket className="w-4 h-4" />;
+    if (n.includes("mua") || n.includes("quà") || n.includes("siêu thị") || n.includes("shoppe")) return <ShoppingBag className="w-4 h-4" />;
+    if (n.includes("thuốc") || n.includes("y tế")) return <Activity className="w-4 h-4" />;
+    return <Banknote className="w-4 h-4" />;
+  };
 
   if (!isLoaded) return <div className="min-h-screen bg-[#020817]" />;
 
@@ -1134,7 +1244,7 @@ function SplitBillContent() {
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
                     <Pie data={chartData} innerRadius={50} outerRadius={70} paddingAngle={5} stroke="none" dataKey="value">
-                      {chartData.map((entry, index) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
+                      {chartData.map((entry: any, index: number) => <Cell key={`cell-${index}`} fill={entry.fill} />)}
                     </Pie>
                     <RechartsTooltip 
                       formatter={(value: any) => [`${Number(value).toLocaleString()} ₫`, '']}
@@ -1163,7 +1273,7 @@ function SplitBillContent() {
                   <div className="relative flex-1">
                     <input
                       value={memberInput} onChange={e => setMemberInput(e.target.value)} onKeyDown={e => e.key === "Enter" && addMember()}
-                      placeholder={lang === "vi" ? "Thêm bạn..." : "Add..."}
+                      placeholder={lang === "vi" ? "Nhập ID (#...) hoặc Email..." : "Enter ID (#...) or Email..."}
                       className="w-full pl-9 pr-4 py-2.5 bg-black/40 border border-white/5 rounded-xl text-sm text-white focus:outline-none focus:border-indigo-500/30 font-medium"
                     />
                     <UserPlus className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
@@ -1177,8 +1287,12 @@ function SplitBillContent() {
                   return (
                     <div key={member.id} className="flex items-center justify-between p-3 rounded-2xl hover:bg-slate-800/50 transition-colors group">
                       <div className="flex items-center gap-3">
-                        <div className={`w-10 h-10 rounded-full ${member.color} flex items-center justify-center text-white text-sm font-black`}>
-                          {member.id === "me" ? <User className="w-5 h-5" /> : member.name[0].toUpperCase()}
+                        <div className={`w-10 h-10 rounded-full ${member.color} flex items-center justify-center text-white text-sm font-black overflow-hidden shadow-sm`}>
+                          {member.image ? (
+                            <img src={member.image} alt={member.name} className="w-full h-full object-cover" />
+                          ) : (
+                            member.id === "me" ? <User className="w-5 h-5" /> : member.name[0].toUpperCase()
+                          )}
                         </div>
                         <div>
                           <div className="flex items-center gap-2">
@@ -1248,10 +1362,7 @@ function SplitBillContent() {
             <div className="flex-1 bg-[#0a1128] border border-white/5 rounded-3xl overflow-hidden shadow-lg flex flex-col relative">
               {activeTab === "expenses" && (
                 <div className="flex flex-col h-full">
-                  <div className="px-6 py-5 border-b border-white/5 flex items-center justify-between bg-slate-900/30">
-                    <h2 className="text-sm font-bold text-white tracking-wide flex items-center gap-2"><Receipt className="w-4 h-4 text-indigo-400" /> {lang === "vi" ? "Lịch sử chi tiêu" : "Expense History"}</h2>
-                    {members.length >= 2 && <button onClick={handleOpenExpForm} className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-xl text-sm font-bold"><Plus className="w-4 h-4" /> Thêm mới</button>}
-                  </div>
+                  <div className="flex-1 flex flex-col overflow-hidden">
 
                   <AnimatePresence>
                     {showExpForm && (
@@ -1332,19 +1443,66 @@ function SplitBillContent() {
                     )}
                   </AnimatePresence>
 
-                  <div className="flex-1 overflow-y-auto px-4 py-2 space-y-2 relative">
-                    {expenses.length === 0 ? <div className="h-full flex flex-col items-center justify-center opacity-40"><Banknote className="w-12 h-12 mb-2" /><p className="text-xs">Chưa có chi tiêu</p></div> : 
-                      expenses.map(exp => {
+                  <div className="px-6 py-4 border-b border-white/5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-slate-900/40">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl bg-indigo-600/10 flex items-center justify-center border border-indigo-500/20 shadow-inner">
+                        <LucideHistory className="w-5 h-5 text-indigo-400" />
+                      </div>
+                      <div>
+                        <h3 className="text-sm font-black uppercase tracking-[0.2em] text-white leading-none mb-1">{lang === "vi" ? "Lịch sử chi tiêu" : "Expense History"}</h3>
+                        <div className="flex items-center gap-1.5">
+                          <div className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                          <span className="text-[10px] text-slate-500 font-bold uppercase tracking-widest">{expenses.length} {lang === "vi" ? "khoản chi" : "items"}</span>
+                        </div>
+                      </div>
+                    </div>
+                    
+                    <div className="flex items-center gap-3 flex-1 sm:justify-end">
+                      <div className="relative group/search flex-1 max-w-[240px]">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-500 group-focus-within/search:text-indigo-400 transition-colors" />
+                        <input 
+                          type="text" 
+                          value={expSearch}
+                          onChange={e => setExpSearch(e.target.value)}
+                          placeholder={lang === "vi" ? "Tìm kiếm nội dung, ngày..." : "Search expenses..."}
+                          className="w-full bg-black/60 border border-white/10 rounded-xl pl-9 pr-3 py-2.5 text-[11px] text-white focus:outline-none focus:border-indigo-500/50 focus:ring-1 focus:ring-indigo-500/20 transition-all placeholder:text-slate-600"
+                        />
+                      </div>
+
+                      <button onClick={() => setShowExpForm(true)} className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-black uppercase tracking-widest flex items-center gap-2.5 shadow-lg shadow-indigo-600/20 hover:shadow-indigo-600/40 hover:-translate-y-0.5 transition-all group">
+                        <Plus className="w-4 h-4 group-hover:rotate-90 transition-transform duration-300" />
+                        {lang === "vi" ? "Thêm mới" : "Add New"}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="max-h-[380px] overflow-y-auto px-4 py-3 space-y-2 relative custom-scrollbar bg-slate-950/20">
+                    {filteredExpenses.length === 0 ? (
+                      <div className="py-20 flex flex-col items-center justify-center opacity-30">
+                        <Search className="w-10 h-10 mb-2 text-slate-500" />
+                        <p className="text-[10px] font-bold uppercase tracking-widest">{lang === "vi" ? "Không tìm thấy kết quả" : "No matches found"}</p>
+                      </div>
+                    ) : 
+                      filteredExpenses.map(exp => {
                         const payer = getMember(exp.paidBy);
                         // Permission check: in offline mode anyone can delete, in multiplayer only owner or payer
                         const canDelete = !isMultiplayer || amILeader || exp.paidBy === myId;
                         
                         return (
-                          <div key={exp.id} className="group flex items-center justify-between p-3 bg-black/20 border border-white/5 rounded-2xl hover:border-white/10 transition-colors">
+                          <div key={exp.id} className="group flex items-center justify-between p-3 bg-black/30 border border-white/5 rounded-2xl hover:border-indigo-500/30 hover:bg-indigo-500/[0.02] transition-all shadow-sm">
                             <div className="flex items-center gap-3">
-                              <div className={`w-10 h-10 rounded-xl ${payer?.color || "bg-slate-700"} flex items-center justify-center text-white text-xs font-black shadow-lg`}>{payer?.name[0].toUpperCase()}</div>
+                              <div className={`w-11 h-11 rounded-2xl ${payer?.color || "bg-slate-700"} flex items-center justify-center text-white shadow-lg relative group-hover:scale-105 transition-transform`}>
+                                {getExpenseIcon(exp.name)}
+                                <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full border-2 border-[#0f172a] overflow-hidden bg-slate-800">
+                                  {payer?.image ? (
+                                    <img src={payer.image} className="w-full h-full object-cover" alt="" />
+                                  ) : (
+                                    <div className="w-full h-full flex items-center justify-center text-[8px] font-black">{payer?.name[0].toUpperCase()}</div>
+                                  )}
+                                </div>
+                              </div>
                               <div>
-                                <p className="font-bold text-white text-sm">{exp.name}</p>
+                                <p className="font-bold text-white text-sm group-hover:text-indigo-300 transition-colors">{exp.name}</p>
                                 <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5 mt-0.5">
                                   <p className="text-[10px] text-slate-500 font-medium">{payer?.name} trả • Chia {exp.participants.length}</p>
                                   {exp.createdAt && (
@@ -1352,7 +1510,73 @@ function SplitBillContent() {
                                       {new Date(exp.createdAt).toLocaleString("vi-VN", { hour: "2-digit", minute: "2-digit", day: "2-digit", month: "2-digit" })}
                                     </p>
                                   )}
+                                  
+                                  {/* Trạng thái thanh toán thông minh (Smart Status) */}
+                                  {(() => {
+                                    const isPayer = exp.paidBy === myId;
+                                    const myShare = exp.shares?.find(s => s.userId === myId);
+                                    
+                                    // Kiểm tra xem tất cả những người khác đã trả cho mình chưa (nếu mình là người chi)
+                                    const othersUnpaid = (exp.shares?.filter(s => s.userId !== myId && !s.settlementPaid).length || 0) > 0;
+
+                                    if (isPayer) {
+                                       if (othersUnpaid) {
+                                          return (
+                                            <div className="text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1.5 shadow-sm border bg-amber-500/10 text-amber-400 border-amber-500/20">
+                                              <div className="w-1 h-1 rounded-full bg-amber-400 animate-bounce" />
+                                              {lang === "vi" ? "Chờ nhận tiền" : "Waiting for return"}
+                                            </div>
+                                          );
+                                       }
+                                    } else {
+                                       if (myShare && !myShare.settlementPaid) {
+                                          return (
+                                            <div className="text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1.5 shadow-sm border bg-rose-500/10 text-rose-400 border-rose-500/20">
+                                              <div className="w-1 h-1 rounded-full bg-rose-400" />
+                                              {lang === "vi" ? "Chưa thanh toán" : "Unpaid"}
+                                            </div>
+                                          );
+                                       }
+                                    }
+                                    
+                                    // Mặc định là đã xong
+                                    return (
+                                      <div className="text-[9px] px-2 py-0.5 rounded-full font-black uppercase tracking-widest flex items-center gap-1.5 shadow-sm border bg-emerald-500/10 text-emerald-400 border-emerald-500/20">
+                                        <div className="w-1 h-1 rounded-full bg-emerald-400" />
+                                        {lang === "vi" ? "Đã thanh toán" : "Paid"}
+                                      </div>
+                                    );
+                                  })()}
                                 </div>
+                                
+                                {/* Chi tiết từng người đã trả hay chưa */}
+                                {isMultiplayer && exp.shares && (
+                                  <div className="flex flex-wrap gap-1 mt-1.5">
+                                    {exp.shares.map(s => {
+                                      const member = getMember(s.userId);
+                                      if (!member) return null;
+                                      const isMeShare = s.userId === myId;
+                                      const isPayer = exp.paidBy === myId;
+                                      const canToggle = isPayer || amILeader || isMeShare;
+                                      
+                                      return (
+                                        <button 
+                                          key={s.userId}
+                                          onClick={() => canToggle && toggleExpensePayment(exp.id, s.userId, s.settlementPaid)}
+                                          className={`flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[8px] font-bold border transition-all ${
+                                            s.settlementPaid 
+                                            ? "bg-emerald-500/10 border-emerald-500/20 text-emerald-400" 
+                                            : "bg-slate-800 border-white/5 text-slate-500"
+                                          } ${canToggle ? "hover:scale-105 hover:border-indigo-500/50" : "cursor-default opacity-80"}`}
+                                          title={canToggle ? (lang === "vi" ? "Nhấn để đổi trạng thái" : "Click to toggle") : ""}
+                                        >
+                                          {member.name}
+                                          {s.settlementPaid ? <Check className="w-2 h-2" /> : <div className="w-1 h-1 rounded-full bg-slate-600" />}
+                                        </button>
+                                      );
+                                    })}
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div className="flex items-center gap-4">
@@ -1375,7 +1599,8 @@ function SplitBillContent() {
                     }
                   </div>
                 </div>
-              )}
+              </div>
+            )}
 
               {activeTab === "settle" && (
                 <motion.div 
@@ -1404,8 +1629,8 @@ function SplitBillContent() {
                         const toMember = getMember(s.to);
                         return (
                           <motion.div 
-                            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.1 }}
-                            key={i} 
+                            initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.05 }}
+                            key={`${s.from}-${s.to}`} 
                             className="bg-black/40 border border-white/5 hover:border-indigo-500/20 rounded-3xl p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-5 transition-colors"
                           >
                             <div className="flex flex-col sm:flex-row sm:items-center gap-5">
@@ -1757,7 +1982,7 @@ export default function SplitBillPage() {
   );
 }
 
-{/* --- Delete Reason Modal --- */}
+// --- Delete Reason Modal ---
 function DeleteReasonModal({ 
   expense, 
   onClose, 
