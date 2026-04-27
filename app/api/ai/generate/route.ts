@@ -7,6 +7,7 @@ import {
   calculateHaversine,
   calculateBudgetDeterministically
 } from "@/lib/itinerary_engine";
+import { getDestinationWeather } from "@/lib/weather";
 import crypto from "crypto";
 
 const prisma = new PrismaClient();
@@ -16,9 +17,10 @@ const prisma = new PrismaClient();
  */
 async function geocodePlace(name: string, lang: string, lat: number, lng: number, anchorLat?: number, anchorLng?: number, bbox?: number[]) {
   try {
+    // Always constrain to Vietnam to avoid wrong-country results
     const proximity = anchorLat && anchorLng ? `&proximity=${anchorLng},${anchorLat}` : "";
     const bboxParam = bbox ? `&bbox=${bbox.join(",")}` : "";
-    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(name)}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&limit=1&language=${lang}${proximity}${bboxParam}`;
+    const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(name)}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&limit=1&language=${lang}&country=vn${proximity}${bboxParam}`;
     
     const res = await fetch(url);
     const data = await res.json();
@@ -63,7 +65,7 @@ function normalizePrompt(p: string) {
 
 export async function POST(req: Request) {
   try {
-    const { prompt, lang = "vi", userLat, userLng } = await req.json();
+    const { prompt, lang = "vi", userLat, userLng, anchorProvince } = await req.json();
 
     if (!prompt) {
       return NextResponse.json({ error: "Missing prompt" }, { status: 400 });
@@ -74,15 +76,15 @@ export async function POST(req: Request) {
     const dayMatch = prompt.match(/(\d+)\s*(ngày|day|d)/i);
     const requestedDays = dayMatch ? Math.min(parseInt(dayMatch[1]), 7) : 1; // Cap at 7 days
     
-    // v6: bust old cache that had truncation issues
-    const promptHash = crypto.createHash("sha256").update(normalized + `_v6_${requestedDays}d`).digest("hex");
+    // v9: bust cache to force fresh geocoding with new anchor strategy
+    const promptHash = crypto.createHash("sha256").update(normalized + `_v9_${requestedDays}d`).digest("hex");
 
     const cached = await prisma.itineraryCache.findUnique({
       where: { promptHash }
     });
 
     if (cached) {
-      console.log(`[Cache Hit v6] Serving data for: ${normalized}`);
+      console.log(`[Cache Hit v8] Serving data for: ${normalized}`);
       return NextResponse.json({ data: cached.intentData });
     }
 
@@ -90,12 +92,55 @@ export async function POST(req: Request) {
         ? `User GPS: lat=${userLat}, lng=${userLng}.`
         : "";
 
-    // --- STEP 2: Smart Prompt - Compact but rich ---
-    // Key fix: reduce magazine to avoid truncation, ask for per-day structure
-    const ITEMS_PER_DAY = 9; // 3 morning + 3 afternoon + 3 evening
+    // --- STEP 2: Use anchorProvince (from frontend selector) as the most reliable anchor ---
+    // This beats Mapbox prompt parsing every time.
+    let destLat: number | undefined, destLng: number | undefined;
+
+    if (anchorProvince) {
+      // Use the selected province directly — most precise possible anchor
+      const anchorRes = await geocodePlace(`${anchorProvince}, Việt Nam`, lang, 0, 0);
+      if (anchorRes.verified) {
+        destLat = anchorRes.lat;
+        destLng = anchorRes.lng;
+        console.log(`[Anchor Province] "${anchorProvince}" → ${destLat?.toFixed(4)}, ${destLng?.toFixed(4)}`);
+      }
+    }
+
+    if (!destLat || !destLng) {
+      // Fallback: Use Mapbox to extract destination from prompt — constrained to Vietnam
+      try {
+        const mapboxRes = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(prompt)}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&limit=1&types=region,place,district,locality&country=vn`);
+        const mapboxData = await mapboxRes.json();
+        if (mapboxData.features && mapboxData.features.length > 0) {
+          destLng = mapboxData.features[0].center[0];
+          destLat = mapboxData.features[0].center[1];
+          console.log(`[Mapbox Prompt] Extracted dest: ${destLat?.toFixed(4)}, ${destLng?.toFixed(4)}`);
+        }
+      } catch (e) { console.error("Mapbox prompt geocode failed", e); }
+    }
+
+    // --- STEP 3: Smart Prompt - Compact but rich ---
+    const ITEMS_PER_DAY = 9;
     const totalItems = ITEMS_PER_DAY * requestedDays;
 
+    // --- SMART WEATHER INJECTION ---
+    const tomorrow = new Date();
+    tomorrow.setDate(tomorrow.getDate() + 1);
+    const endDateObj = new Date(tomorrow);
+    endDateObj.setDate(tomorrow.getDate() + requestedDays - 1);
+    const startDateStr = tomorrow.toISOString().split('T')[0];
+    const endDateStr = endDateObj.toISOString().split('T')[0];
+
+    const weatherData = destLat && destLng 
+       ? await getDestinationWeather(prompt, startDateStr, endDateStr, destLat, destLng)
+       : await getDestinationWeather(prompt, startDateStr, endDateStr);
+       
+    const weatherContext = weatherData.hasData 
+      ? `\n\nWEATHER CONTEXT FOR DESTINATION:\n${weatherData.forecastString}` 
+      : "";
+
     const systemInstruction = `You are an expert Vietnamese travel journalist. Respond ONLY in raw JSON (no markdown).
+${weatherContext}
 
 RULES:
 - "city": main destination city name (string)
@@ -112,6 +157,8 @@ CATEGORY: must be one of: attraction | restaurant | hotel | entertainment
 
 INTELLIGENT SUGGESTIONS:
 - Only suggest places WITHIN the destination city/province (NOT neighboring provinces)
+- MUST include Phố Cổ Hội An (Ancient Town) in EVENING session if destination is Hội An / Hoi An — it's most magical at night with lanterns lit
+- Evening: if destination is Hội An → suggest Phố Đêm Hội An (night walk), Chùa Cầu by night, Chợ Đêm Hội An, live acoustic café
 - Evening: if no beach → suggest night market, local bar, night walk, live music cafe
 - Evening: if beach exists → suggest sunset beach walk, seafood dinner, night swimming area
 - Always include 1 hotel recommendation per day group
@@ -122,6 +169,7 @@ JSON Schema:
 {
   "city": "string",
   "days_count": ${requestedDays},
+  "weather_warning": {"vi": "Cảnh báo thời tiết ngắn gọn nếu có thời tiết xấu (Bão, Mưa lớn, Mưa liên tục). Nếu thời tiết đẹp, để rỗng hoặc null", "en": "..."},
   "magazine_wiki": {
     "title": {"vi": "...", "en": "..."},
     "content_blocks": [{"heading": {"vi": "...", "en": "..."}, "body": {"vi": "...", "en": "..."}}]
@@ -166,14 +214,46 @@ JSON Schema:
     }
 
     const targetCity = leanData.city || "Unknown City";
-    // Phase 20 Fix: Geocode destination city WITHOUT user proximity to avoid Da Nang bias
-    const cityRes = await geocodePlace(targetCity, lang, 0, 0); 
-    const anchorLat = cityRes.lat || userLat || 0;
-    const anchorLng = cityRes.lng || userLng || 0;
 
-    // Wider bbox for provincial searches (e.g., Gia Lai is large)
-    const bboxRadius = 1.2;
+    // === DEFINITIVE ANCHOR STRATEGY ===
+    // Priority: 1) AI city name (most accurate — AI knows the right city)
+    //           2) User GPS proximity to break ties (finds nearest match)
+    //           3) Province anchor from frontend selector
+    //           4) Raw Mapbox prompt parse
+    //           5) Central Vietnam fallback
+    
+    // Step 1: Always geocode from AI-returned city name — use user GPS as proximity bias
+    const cityGeoRes = await geocodePlace(
+      `${targetCity}, Việt Nam`, 
+      lang, 0, 0, 
+      userLat || undefined, userLng || undefined  // GPS proximity → finds nearest match first
+    );
+    
+    let anchorLat: number;
+    let anchorLng: number;
+
+    if (cityGeoRes.verified) {
+      // AI city found correctly (e.g. "Hội An" → 15.882, 108.335 in Quảng Nam)
+      anchorLat = cityGeoRes.lat;
+      anchorLng = cityGeoRes.lng;
+      console.log(`[Anchor v9 AI-city] "${targetCity}" → ${anchorLat.toFixed(4)}, ${anchorLng.toFixed(4)}`);
+    } else if (destLat && destLng) {
+      // Fallback to Mapbox prompt parse or province anchor
+      anchorLat = destLat;
+      anchorLng = destLng;
+      console.log(`[Anchor v9 destCoord] → ${anchorLat.toFixed(4)}, ${anchorLng.toFixed(4)}`);
+    } else {
+      // Last resort: user GPS or central VN
+      anchorLat = userLat || 15.88;
+      anchorLng = userLng || 108.33;
+      console.log(`[Anchor v9 fallback] → ${anchorLat.toFixed(4)}, ${anchorLng.toFixed(4)}`);
+    }
+
+    // Tight bbox: 0.3 degree ≈ 33km radius around city center
+    const bboxRadius = 0.3;
     const bbox = [anchorLng - bboxRadius, anchorLat - bboxRadius, anchorLng + bboxRadius, anchorLat + bboxRadius];
+    console.log(`[BBox v9] ${targetCity} → [${bbox.map(n => n.toFixed(3)).join(", ")}]`);
+
 
     const geocodedPlaces: any[] = [];
     const seenCoords = new Set<string>();
@@ -183,19 +263,28 @@ JSON Schema:
       const baseName = (rawName || "").split(/ và | and | & /i)[0].trim();
       if (!baseName) continue;
       
-      // Try with city suffix first for accuracy
-      let res = await geocodePlace(`${baseName}, ${targetCity}`, lang, 0, 0, anchorLat, anchorLng, bbox);
+      // Try with "place_name, city_name, Vietnam" for maximum precision
+      let res = await geocodePlace(`${baseName}, ${targetCity}, Việt Nam`, lang, 0, 0, anchorLat, anchorLng, bbox);
       
-      // If still too far from anchor, try without city suffix
+      // If bbox returned no match or result is too far, fall back to city-only suffix
       const distFromAnchor = calculateHaversine(res.lat, res.lng, anchorLat, anchorLng);
-      if (distFromAnchor > 80) {
+      if (!res.verified || distFromAnchor > 50) {
+        res = await geocodePlace(`${baseName}, ${targetCity}`, lang, 0, 0, anchorLat, anchorLng, bbox);
+      }
+      // Last resort: bare name with bbox
+      if (!res.verified || calculateHaversine(res.lat, res.lng, anchorLat, anchorLng) > 50) {
         res = await geocodePlace(baseName, lang, 0, 0, anchorLat, anchorLng, bbox);
       }
+      // Hard clamp: if still outside bbox, snap to anchor so pin never flies far away
+      if (calculateHaversine(res.lat, res.lng, anchorLat, anchorLng) > 60) {
+        res = { lat: anchorLat, lng: anchorLng + (Math.random() - 0.5) * 0.01, verified: false, place_name: baseName };
+      }
 
-      const coordKey = `${res.lat.toFixed(3)},${res.lng.toFixed(3)}`;
-      if (!seenCoords.has(coordKey)) {
+      // Dedup by place name (not coordinates) to avoid filtering nearby places in the same area
+      const nameKey = baseName.toLowerCase().replace(/\s+/g, " ").trim();
+      if (!seenCoords.has(nameKey)) {
         geocodedPlaces.push({ ...p, lat: res.lat, lng: res.lng, geocoded: res.verified });
-        seenCoords.add(coordKey);
+        seenCoords.add(nameKey);
       }
     }
 
@@ -227,7 +316,8 @@ JSON Schema:
       days: finalDays,
       cost_breakdown: budget,
       total_estimated_cost: budget.total,
-      magazine_wiki: leanData.magazine_wiki || { title: { vi: targetCity, en: targetCity }, content_blocks: [] }
+      magazine_wiki: leanData.magazine_wiki || { title: { vi: targetCity, en: targetCity }, content_blocks: [] },
+      forecast_data: weatherData.rawForecast || null
     };
 
     const expiresAt = new Date();

@@ -390,6 +390,9 @@ export default function ItineraryPage() {
   const [showWiki, setShowWiki] = useState(false);
   const [costBreakdown, setCostBreakdown] = useState<any>(null);
   const [magazineWiki, setMagazineWiki] = useState<MagazineWiki | null>(null);
+  const [weatherWarning, setWeatherWarning] = useState<LocalizedString | null>(null);
+  const [hideWeatherWarning, setHideWeatherWarning] = useState(false);
+  const [forecastData, setForecastData] = useState<any>(null);
 
   useEffect(() => {
     const savedProv = localStorage.getItem("optiroute_selected_province");
@@ -640,7 +643,7 @@ export default function ItineraryPage() {
         if (savedPrompt) setPrompt(savedPrompt);
 
         // Core App State Restoration
-        const savedAppState = sessionStorage.getItem("optiroute_session_state");
+        const savedAppState = sessionStorage.getItem("optiroute_session_state_v9");
         if (savedAppState) {
           const parsedState = JSON.parse(savedAppState);
           if (parsedState.itineraryResult) {
@@ -671,9 +674,11 @@ export default function ItineraryPage() {
           if (parsedState.journeyStepIdx !== undefined) setJourneyStepIdx(parsedState.journeyStepIdx);
           if (parsedState.searchMode) setSearchMode(parsedState.searchMode);
           if (parsedState.searchTab) setSearchTab(parsedState.searchTab);
+          if (parsedState.weatherWarning) setWeatherWarning(parsedState.weatherWarning);
+          if (parsedState.forecastData) setForecastData(parsedState.forecastData);
         } else {
            // Fallback for old partial loads
-           const savedItin = sessionStorage.getItem("optiroute_current_itinerary");
+           const savedItin = sessionStorage.getItem("optiroute_current_itinerary_v9");
            if (savedItin) {
              const parsed = JSON.parse(savedItin);
              const migrated = parsed.map((d: any) => ({
@@ -716,15 +721,16 @@ export default function ItineraryPage() {
          checkins,
          journeyStepIdx,
          searchMode,
-         searchTab
+         searchTab,
+         weatherWarning,
+         forecastData
        };
-       sessionStorage.setItem("optiroute_session_state", JSON.stringify(stateToSave));
-       // Keep old compat just in case
-       sessionStorage.setItem("optiroute_current_itinerary", JSON.stringify(itineraryResult));
+       sessionStorage.setItem("optiroute_session_state_v9", JSON.stringify(stateToSave));
+       sessionStorage.setItem("optiroute_current_itinerary_v9", JSON.stringify(itineraryResult));
     }
   }, [
     isStateRestored, itineraryResult, activeLocation, isNavigating, activeStepIdx, activeDayIdx, 
-    journeyActive, navStatus, navTargetName, checkins, journeyStepIdx, searchMode, searchTab 
+    journeyActive, navStatus, navTargetName, checkins, journeyStepIdx, searchMode, searchTab, weatherWarning, forecastData 
   ]);
 
   useEffect(() => {
@@ -773,6 +779,8 @@ export default function ItineraryPage() {
     setJourneyActive(false);
     setIsNavigating(false);
     setCheckins({});
+    setWeatherWarning(null);
+    setForecastData(null);
     
     // Clear persistence safely
     if (typeof window !== "undefined") {
@@ -1214,11 +1222,13 @@ export default function ItineraryPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         // Phase 19: Pass user GPS to AI for location-aware itinerary start
-        body: JSON.stringify({
+      body: JSON.stringify({
           prompt: textToGenerate,
           lang,
           userLat: userLocation?.lat,
           userLng: userLocation?.lng,
+          // Pass selected province as primary anchor — overrides all Mapbox prompt parsing
+          anchorProvince: selectedProvince || undefined,
         }),
       });
 
@@ -1273,6 +1283,16 @@ export default function ItineraryPage() {
       setItineraryResult(migrated);
       if (data.data.magazine_wiki) {
         setMagazineWiki(data.data.magazine_wiki);
+      }
+      if (data.data.weather_warning) {
+        setWeatherWarning(data.data.weather_warning);
+      } else {
+        setWeatherWarning(null);
+      }
+      if (data.data.forecast_data) {
+        setForecastData(data.data.forecast_data);
+      } else {
+        setForecastData(null);
       }
       if (data.data.total_estimated_cost) {
         setCostBreakdown({
@@ -1621,6 +1641,11 @@ export default function ItineraryPage() {
               <textarea
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
+                onInput={(e) => {
+                  const target = e.target as HTMLTextAreaElement;
+                  target.style.height = "auto";
+                  target.style.height = `${target.scrollHeight}px`;
+                }}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && !e.shiftKey) {
                     e.preventDefault();
@@ -1628,7 +1653,8 @@ export default function ItineraryPage() {
                   }
                 }}
                 placeholder={itinT.promptPlaceholder}
-                className="w-full min-h-[160px] bg-slate-900/50 border border-white/10 rounded-[24px] p-6 text-sm leading-relaxed placeholder:text-slate-600 focus:bg-slate-900/80 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 transition-all resize-none shadow-inner"
+                className="w-full min-h-[60px] h-auto bg-slate-900/50 border border-white/10 rounded-[24px] p-6 text-sm leading-relaxed placeholder:text-slate-600 focus:bg-slate-900/80 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/10 transition-all overflow-hidden shadow-inner"
+                style={{ resize: 'none' }}
               />
               <motion.button
                 whileHover={{
@@ -1647,6 +1673,23 @@ export default function ItineraryPage() {
                 )}
               </motion.button>
             </div>
+
+            {/* Smart Location Hint — shown when user is typing but hasn't found a result yet */}
+            {!itineraryResult && !isGenerating && prompt.trim().length > 3 && (
+              <motion.div
+                initial={{ opacity: 0, y: -4 }}
+                animate={{ opacity: 1, y: 0 }}
+                className="flex items-start gap-2.5 px-4 py-3 rounded-2xl bg-amber-500/5 border border-amber-500/15"
+              >
+                <span className="text-base shrink-0 mt-0.5">💡</span>
+                <p className="text-[11px] text-amber-300/75 leading-relaxed">
+                  {lang === "vi"
+                    ? <><strong className="text-amber-300">Mẹo:</strong> Để định vị chính xác, hãy ghi rõ <strong className="text-amber-200">Tên địa điểm + Tỉnh/Thành</strong>.<br/>VD: <code className="bg-amber-500/10 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[10px]">Hội An, Quảng Nam 2 ngày</code></>
+                    : <><strong className="text-amber-300">Tip:</strong> Include the <strong className="text-amber-200">city + province</strong> for best results.<br/>E.g. <code className="bg-amber-500/10 px-1.5 py-0.5 rounded text-amber-200 font-mono text-[10px]">Hoi An, Quang Nam 2 days</code></>
+                  }
+                </p>
+              </motion.div>
+            )}
 
             {/* Search Suggestion Chips */}
             {!itineraryResult && !isGenerating && (
@@ -1782,6 +1825,34 @@ export default function ItineraryPage() {
                     {/* Phase 17/18: Branch between AI and Local List Rendering */}
                     {searchMode === "ai" && itineraryResult ? (
                       <div className="space-y-6">
+                        {/* Weather Warning Banner */}
+                        {!hideWeatherWarning && weatherWarning && (
+                          <motion.div
+                            initial={{ opacity: 0, y: -10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            className="p-5 bg-gradient-to-br from-rose-500/20 to-red-900/40 border border-rose-500/30 rounded-3xl flex items-start gap-4 shadow-[0_10px_30px_rgba(225,29,72,0.15)] relative overflow-hidden group/warning mb-6"
+                          >
+                            <button onClick={() => setHideWeatherWarning(true)} className="absolute top-4 right-4 z-20 text-rose-500 hover:text-white transition-colors bg-white/5 hover:bg-rose-500/50 rounded-full p-1.5 backdrop-blur-md">
+                              <X className="w-3.5 h-3.5" />
+                            </button>
+                            <div className="absolute top-0 right-0 w-32 h-32 bg-rose-500/10 blur-[50px] rounded-full pointer-events-none" />
+                            <div className="p-3 bg-gradient-to-br from-rose-500 to-red-600 rounded-2xl shrink-0 mt-0.5 shadow-lg shadow-rose-500/20">
+                              <span className="text-2xl text-white block">⚠️</span>
+                            </div>
+                            <div className="relative z-10 pr-8">
+                              <h4 className="text-[11px] font-black text-rose-400 mb-1.5 tracking-widest uppercase flex items-center gap-2">
+                                <MapPin className="w-3.5 h-3.5" />
+                                {lang === "vi" ? "Cảnh báo thời tiết điểm đến" : "Destination Weather Alert"}
+                              </h4>
+                              <p className="text-sm text-rose-100/90 leading-relaxed font-medium">
+                                {getLocString(weatherWarning, lang)}
+                              </p>
+                            </div>
+                          </motion.div>
+                        )}
+                        
+                        {/* Removed Weather Forecast Widget per user request */}
+                        
                         {/* Day Tabs - Harmonious & Minimalist Version */}
                         <div className="flex items-center gap-3 py-3 border-b border-white/5 mb-4 sticky top-0 z-30 bg-slate-950/80 backdrop-blur-xl">
                           <motion.button

@@ -26,8 +26,30 @@ export async function GET() {
       })
     ]);
 
+    const cityMap: Record<string, string> = {
+      "Chợ Mới": "Đà Nẵng",
+      "Cho Moi": "Đà Nẵng",
+      "Hòa Vang": "Đà Nẵng",
+      "Hoa Vang": "Đà Nẵng",
+      "Thanh Khê": "Đà Nẵng",
+      "Lien Chieu": "Đà Nẵng",
+      "Cam Le": "Đà Nẵng",
+      "Da Nang": "Đà Nẵng",
+      "Ho Chi Minh City": "TP. HCM",
+      "Ho Chi Minh": "TP. HCM",
+      "District 1": "TP. HCM",
+      "District 3": "TP. HCM",
+      "Hanoi": "Hà Nội",
+      "Ha Noi": "Hà Nội",
+      "Ba Dinh": "Hà Nội",
+      "Hoan Kiem": "Hà Nội"
+    };
+
     const cityDistribution = onlineUsers.reduce((acc: any, user) => {
-      const city = user.lastCity || "Đang xác định...";
+      let city = user.lastCity || "Đang xác định...";
+      // Ánh xạ về tên Tỉnh/Thành phố lớn nếu có trong map
+      if (cityMap[city]) city = cityMap[city];
+      
       acc[city] = (acc[city] || 0) + 1;
       return acc;
     }, {});

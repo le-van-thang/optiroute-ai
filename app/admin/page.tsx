@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import { useToast } from "@/components/providers/ToastProvider";
+import { WeatherDetailModal } from "@/components/weather/WeatherDetailModal";
 
 interface Stats {
   userCount: number;
@@ -48,6 +49,9 @@ export default function AdminDashboard() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [recentReports, setRecentReports] = useState<RecentReport[]>([]);
   const [liveEvents, setLiveEvents] = useState<LiveEvent[]>([]);
+  
+  interface CityWeather { name: string; temp: number; code: number; isBad: boolean; }
+  const [liveWeather, setLiveWeather] = useState<CityWeather[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [lastPing, setLastPing] = useState(new Date());
   const [siteName, setSiteName] = useState("OptiRoute AI");
@@ -56,6 +60,8 @@ export default function AdminDashboard() {
   const [showBroadcastModal, setShowBroadcastModal] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [broadcastForm, setBroadcastForm] = useState({ title: "", content: "", type: "INFO" });
+  const [isWeatherDetailOpen, setIsWeatherDetailOpen] = useState(false);
+  const [selectedWeatherCity, setSelectedWeatherCity] = useState("Hà Nội");
   const { showToast } = useToast();
 
   const fetchData = async () => {
@@ -96,10 +102,46 @@ export default function AdminDashboard() {
     window.addEventListener("keydown", handleKeyDown);
     const pingTimer = setInterval(() => setLastPing(new Date()), 1000);
     
+    // Phase 3: Fetch Live Weather Pulse for Admin
+    const fetchWeather = async () => {
+      try {
+        const cities = [
+          { name: "Hà Nội", lat: 21.0285, lng: 105.8542 },
+          { name: "Đà Nẵng", lat: 16.0678, lng: 108.2208 },
+          { name: "Đà Lạt", lat: 11.9404, lng: 108.4583 },
+          { name: "TP. HCM", lat: 10.8231, lng: 106.6297 }
+        ];
+        
+        const lats = cities.map(c => c.lat).join(",");
+        const lngs = cities.map(c => c.lng).join(",");
+        const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lats}&longitude=${lngs}&current=temperature_2m,weather_code&timezone=Asia/Bangkok`);
+        const data = await res.json();
+        
+        // Handle array response for multiple locations
+        const results = (Array.isArray(data) ? data : [data]).map((d: any, i: number) => {
+          const code = d.current.weather_code;
+          const isBad = (code >= 51 && code <= 67) || (code >= 80 && code <= 99);
+          return {
+            name: cities[i].name,
+            temp: d.current.temperature_2m,
+            code,
+            isBad
+          };
+        });
+        setLiveWeather(results);
+      } catch (err) {
+        console.error("Failed to fetch admin weather:", err);
+      }
+    };
+    
+    fetchWeather();
+    const weatherInterval = setInterval(fetchWeather, 5 * 60 * 1000); // 5 mins
+
     return () => {
       clearInterval(statsInterval);
       clearInterval(healthInterval);
       clearInterval(pingTimer);
+      clearInterval(weatherInterval);
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, []);
@@ -276,7 +318,51 @@ export default function AdminDashboard() {
                   </motion.div>
                 )) : (
                   <p className="text-xs text-slate-600 italic">Đang chờ sự kiện tiếp theo...</p>
-                )}
+                 )}
+             </div>
+          </div>
+
+          {/* Phase 3: Live Weather Pulse */}
+          <div className="space-y-6">
+             <h3 className="text-xs font-black uppercase text-slate-400 tracking-widest flex items-center gap-2 px-2">
+               <Globe className="w-4 h-4 text-cyan-500" />
+               Nhịp đập thời tiết toàn quốc
+             </h3>
+             <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                {liveWeather.map((w, i) => {
+                  let icon = "☁️";
+                  if (w.code === 0) icon = "☀️";
+                  else if (w.code <= 3) icon = "⛅";
+                  else if (w.code === 45 || w.code === 48) icon = "🌫️";
+                  else if (w.code >= 51 && w.code <= 67) icon = "🌧️";
+                  else if (w.code >= 71 && w.code <= 77) icon = "❄️";
+                  else if (w.code >= 80 && w.code <= 82) icon = "🌧️";
+                  else if (w.code >= 95 && w.code <= 99) icon = "⛈️";
+
+                  return (
+                    <motion.div 
+                      initial={{ opacity: 0, y: 10 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{ delay: i * 0.1 }}
+                      key={w.name}
+                      onClick={() => {
+                        setSelectedWeatherCity(w.name);
+                        setIsWeatherDetailOpen(true);
+                      }}
+                      className={`p-4 rounded-3xl border transition-all relative overflow-hidden group cursor-pointer hover:scale-105 ${w.isBad ? 'bg-rose-500/10 border-rose-500/30 ring-1 ring-rose-500/20' : 'bg-slate-900/40 border-white/5 hover:border-white/10'}`}
+                    >
+                      {w.isBad && (
+                        <div className="absolute top-2 right-2 w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                      )}
+                      <div className="text-2xl mb-2">{icon}</div>
+                      <p className="text-[10px] font-black uppercase tracking-widest text-slate-500 mb-0.5">{w.name}</p>
+                      <div className="flex items-center gap-2">
+                        <p className={`text-xl font-black ${w.isBad ? 'text-rose-400' : 'text-white'}`}>{Math.round(w.temp)}°</p>
+                        {w.isBad && <span className="text-[8px] font-bold bg-rose-500/20 text-rose-400 px-1.5 py-0.5 rounded-sm uppercase">Cảnh báo</span>}
+                      </div>
+                    </motion.div>
+                  );
+                })}
              </div>
           </div>
         </div>
@@ -601,6 +687,12 @@ export default function AdminDashboard() {
           </motion.div>
         )}
       </AnimatePresence>
+      {/* Weather Detail Modal */}
+      <WeatherDetailModal 
+        isOpen={isWeatherDetailOpen}
+        onClose={() => setIsWeatherDetailOpen(false)}
+        city={selectedWeatherCity}
+      />
     </div>
   );
 }
