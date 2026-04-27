@@ -21,6 +21,11 @@ export const authOptions: NextAuthOptions = {
     FacebookProvider({
       clientId: process.env.FACEBOOK_CLIENT_ID || "",
       clientSecret: process.env.FACEBOOK_CLIENT_SECRET || "",
+      authorization: {
+        params: {
+          scope: "email,public_profile"
+        }
+      }
     }),
     CredentialsProvider({
       name: "Email and Password",
@@ -74,9 +79,21 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt"
   },
   callbacks: {
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       if (account?.provider === "google" || account?.provider === "facebook") {
-        if (!user.email) return false;
+        // Fallback cho trường hợp Facebook dùng SĐT (không có email)
+        if (!user.email && account.provider === "facebook") {
+          const fbId = (profile as any)?.id || (user as any)?.id;
+          if (fbId) {
+            user.email = `fb_${fbId}@facebook.com`;
+            console.log(`[Auth] Generated fallback email for FB user: ${user.email}`);
+          }
+        }
+
+        if (!user.email) {
+          console.error(`[Auth] Error: Social provider ${account.provider} did not return an email address.`);
+          return false;
+        }
         
         // Phase 26: Chỉnh chu - Chặn đăng nhập bằng Google/FB nếu Email này đã bị Admin xóa vĩnh viễn trước đó
         const userEmail = user?.email?.toLowerCase();
@@ -86,7 +103,6 @@ export const authOptions: NextAuthOptions = {
           });
 
           if (deletedRecord) {
-            // Trả về URL redirect với mã lỗi đặc biệt
             return `/login?error=DeletedAccount&reason=${encodeURIComponent(deletedRecord.reason)}`;
           }
         }
@@ -101,13 +117,15 @@ export const authOptions: NextAuthOptions = {
           where: { email: user.email },
           update: {
             name: user.name,
+            image: user.image,
             emailVerified: true,
             emailVerifiedAt: new Date(),
           },
           create: {
             email: user.email,
             name: user.name,
-            passwordHash: "", // Social accounts don't use this
+            image: user.image,
+            passwordHash: "", 
             emailVerified: true,
             emailVerifiedAt: new Date(),
           },

@@ -13,6 +13,7 @@ import { PieChart, Pie, Cell, ResponsiveContainer, Tooltip as RechartsTooltip } 
 
 import { useToast } from "@/components/providers/ToastProvider";
 import { PremiumModal } from "@/components/ui/PremiumModal";
+import { WeatherDetailModal } from "@/components/weather/WeatherDetailModal";
 
 const fetcher = (url: string) => fetch(url).then((res) => res.json());
 
@@ -56,18 +57,104 @@ export default function DashboardPage() {
 
   const [dynamicCity, setDynamicCity] = useState("Hà Nội");
   
+  // Premium Weather Widget State
+  const [dashboardWeather, setDashboardWeather] = useState<any>(null);
+  const [weatherTargetCity, setWeatherTargetCity] = useState("Hà Nội");
+  const [isWeatherDestination, setIsWeatherDestination] = useState(false);
+  const [isWeatherPreview, setIsWeatherPreview] = useState(false); // true when previewing typed search
+  const [isFetchingWeather, setIsFetchingWeather] = useState(false);
+  const [userGpsLocation, setUserGpsLocation] = useState<{ city: string; lat: number; lng: number } | null>(null);
+  
+  // Weather Detail Modal
+  const [isWeatherDetailOpen, setIsWeatherDetailOpen] = useState(false);
+
+  const fetchWeatherForCity = async (city: string, isPreview = false, isDestination = false) => {
+    if (!city || !process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN) return;
+    setIsFetchingWeather(true);
+    try {
+      const geoRes = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(city)}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&limit=1&country=vn`);
+      const geoData = await geoRes.json();
+      if (geoData.features && geoData.features.length > 0) {
+        const lat = geoData.features[0].center[1];
+        const lng = geoData.features[0].center[0];
+        const wRes = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,weather_code,relative_humidity_2m,wind_speed_10m&timezone=Asia/Bangkok`);
+        const wData = await wRes.json();
+        setDashboardWeather(wData.current);
+        setWeatherTargetCity(city);
+        setIsWeatherDestination(isDestination);
+        setIsWeatherPreview(isPreview);
+      }
+    } catch (err) {
+      console.error("Dashboard weather fetch failed", err);
+    } finally {
+      setIsFetchingWeather(false);
+    }
+  };
+
   useEffect(() => {
-    const cycleCities = ["Hà Nội", "Hà Giang", "Đà Nẵng", "Đà Lạt", "Phú Quốc", "Tokyo", "Seoul", "Sapa", "Ninh Bình", "Hội An", "Bangkok", "Singapore", "Paris"];
-    let idx = 0;
-    const interval = setInterval(() => {
-      idx = (idx + 1) % cycleCities.length;
-      setDynamicCity(cycleCities[idx]);
-    }, 3000);
-    return () => clearInterval(interval);
+    // Phase 1: Try GPS Geolocation for a truly personalized experience
+    if ("geolocation" in navigator) {
+      navigator.geolocation.getCurrentPosition(async (position) => {
+        const { latitude, longitude } = position.coords;
+        try {
+          const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&types=place&limit=1`);
+          const data = await res.json();
+          if (data.features?.[0]) {
+            const cityName = data.features[0].text;
+            setUserGpsLocation({ city: cityName, lat: latitude, lng: longitude });
+            // If no search and no upcoming trip, show GPS weather
+            if (!prompt.trim() && (!trips || trips.length === 0)) {
+               fetchWeatherForCity(cityName, false, false);
+            }
+          }
+        } catch (err) {
+          console.error("GPS Reverse Geocoding failed", err);
+        }
+      });
+    }
   }, []);
 
+  useEffect(() => {
+    // Priority 2: Trip Destination (if prompt is empty)
+    if (prompt.trim()) return;
+
+    if (trips && trips.length > 0 && trips[0].city) {
+      fetchWeatherForCity(trips[0].city, false, true);
+    } else if (userGpsLocation) {
+      fetchWeatherForCity(userGpsLocation.city, false, false);
+    } else {
+      // Final fallback
+      fetchWeatherForCity("Hà Nội", false, false);
+    }
+  }, [trips, userGpsLocation]);
+
+  // Live weather preview when user types in search box (debounced 800ms)
+  useEffect(() => {
+    if (!prompt.trim() || prompt.trim().length < 3) {
+      // If search cleared, revert to trip-based or GPS weather
+      if (!isWeatherPreview) return;
+      
+      if (trips && trips.length > 0 && trips[0].city) {
+        fetchWeatherForCity(trips[0].city, false, true);
+      } else if (userGpsLocation) {
+        fetchWeatherForCity(userGpsLocation.city, false, false);
+      } else {
+        fetchWeatherForCity("Hà Nội", false, false);
+      }
+      return;
+    }
+    const debounce = setTimeout(() => {
+      // Extract location name from prompt: take first meaningful noun phrase
+      const locationMatch = prompt.match(/([\p{L}\s]+?)(?:\s+\d+\s*(?:ngày|day|đêm|night))?$/iu);
+      const searchCity = locationMatch?.[1]?.trim() || prompt.trim();
+      fetchWeatherForCity(searchCity, true, false);
+    }, 800);
+    return () => clearTimeout(debounce);
+  }, [prompt]);
+
   const COLORS = ['#22d3ee', '#10b981', '#f59e0b', '#f43f5e', '#8b5cf6'];
-  const chartData = Array.isArray(expenses) ? expenses.map((exp: any) => ({
+  
+  const chartData = expenses && expenses.length > 0 ? expenses.map((exp: any) => ({
     name: exp.title,
     value: exp.totalAmount
   })) : [];
@@ -334,10 +421,90 @@ export default function DashboardPage() {
             )}
           </motion.div>
 
-          {/* Right Column: AI & Expenses */}
+          {/* Right Column: AI, Weather & Expenses */}
           <div className="grid grid-cols-1 gap-6">
+            
+            {/* Premium Interactive Weather Environment */}
+            {dashboardWeather && (
+              <motion.div 
+                variants={itemVariants} 
+                onClick={() => setIsWeatherDetailOpen(true)}
+                className="relative rounded-[2.5rem] overflow-hidden shadow-[0_20px_50px_rgba(0,0,0,0.5)] group h-[250px] cursor-pointer hover:scale-[1.02] transition-transform"
+              >
+                {/* Subdued Premium Weather Background */}
+                <div className={`absolute inset-0 transition-colors duration-1000 ${
+                  dashboardWeather.weather_code <= 3 
+                    ? (dashboardWeather.is_day === 1 
+                        ? 'bg-gradient-to-br from-[#38bdf8] via-[#0ea5e9] to-[#0284c7]' // iOS Light Blue Day
+                        : 'bg-gradient-to-br from-[#0f172a] via-[#1e293b] to-[#1e3a8a]') // Pro Navy Night
+                    : (dashboardWeather.weather_code >= 51 && dashboardWeather.weather_code <= 67) || (dashboardWeather.weather_code >= 80 && dashboardWeather.weather_code <= 82)
+                      ? 'bg-gradient-to-br from-[#475569] via-[#1e293b] to-[#0f172a]' // Gloomy/Rainy
+                      : 'bg-gradient-to-br from-[#1e1b4b] to-[#020617]' // Stormy
+                }`} />
+                
+                {/* Animated Particles / Ambient Glow */}
+                <div className="absolute inset-0 opacity-50 bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] mix-blend-overlay" />
+                <div className="absolute -top-24 -right-24 w-64 h-64 bg-white/20 blur-[80px] rounded-full group-hover:scale-150 transition-transform duration-700" />
+                
+                <div className="relative h-full p-8 flex flex-col justify-between z-10 text-white">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <h2 className="text-sm font-black uppercase tracking-[0.2em] flex items-center gap-2 mb-1 text-white/90 drop-shadow-md">
+                        <MapPin className="w-4 h-4" />
+                        {weatherTargetCity}
+                        {isFetchingWeather && <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />}
+                      </h2>
+                      <p className="text-[10px] font-bold uppercase tracking-widest text-white/70">
+                        {isWeatherPreview
+                          ? (lang === "vi" ? "🔍 Xem trước thời tiết" : "🔍 Weather Preview")
+                          : isWeatherDestination
+                          ? (lang === "vi" ? "Dự báo điểm đến sắp tới" : "Destination Forecast")
+                          : (lang === "vi" ? "Thời tiết tại vị trí của bạn" : "Local Weather")}
+                      </p>
+                    </div>
+                    
+                    {/* Floating Giant Icon */}
+                    <motion.div 
+                      animate={{ y: [0, -10, 0] }} 
+                      transition={{ repeat: Infinity, duration: 4, ease: "easeInOut" }}
+                      className="text-7xl filter drop-shadow-[0_10px_20px_rgba(0,0,0,0.4)]"
+                    >
+                      {dashboardWeather.weather_code === 0 ? "☀️" : 
+                       dashboardWeather.weather_code <= 3 ? "⛅" : 
+                       (dashboardWeather.weather_code === 45 || dashboardWeather.weather_code === 48) ? "🌫️" :
+                       (dashboardWeather.weather_code >= 51 && dashboardWeather.weather_code <= 67) ? "🌧️" :
+                       (dashboardWeather.weather_code >= 71 && dashboardWeather.weather_code <= 77) ? "❄️" :
+                       (dashboardWeather.weather_code >= 80 && dashboardWeather.weather_code <= 82) ? "🌧️" :
+                       (dashboardWeather.weather_code >= 95 && dashboardWeather.weather_code <= 99) ? "⛈️" : "☁️"}
+                    </motion.div>
+                  </div>
+                  
+                  <div className="flex items-end justify-between w-full">
+                    <div className="flex items-end gap-3">
+                      <h3 className="text-7xl font-black tracking-tighter drop-shadow-lg leading-none">{Math.round(dashboardWeather.temperature_2m)}°</h3>
+                      <div className="pb-2">
+                        <span className="text-sm font-bold text-white/80 drop-shadow">Cảm giác {Math.round(dashboardWeather.temperature_2m + 1)}°</span>
+                      </div>
+                    </div>
+                    
+                    <div className="flex gap-4 backdrop-blur-md bg-black/20 p-3 rounded-2xl border border-white/10">
+                      <div className="text-center">
+                         <p className="text-[9px] font-black uppercase text-white/60 mb-0.5">Độ ẩm</p>
+                         <p className="text-sm font-bold">{dashboardWeather.relative_humidity_2m}%</p>
+                      </div>
+                      <div className="w-px bg-white/20" />
+                      <div className="text-center">
+                         <p className="text-[9px] font-black uppercase text-white/60 mb-0.5">Gió</p>
+                         <p className="text-sm font-bold">{dashboardWeather.wind_speed_10m} km/h</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </motion.div>
+            )}
+
             {/* Expense Analytics */}
-            <motion.div variants={itemVariants} className="bg-slate-900/40 border border-border rounded-[2rem] overflow-hidden shadow-soft relative flex flex-col min-h-[250px]">
+            <motion.div variants={itemVariants} className="bg-slate-900/40 border border-border rounded-[2.5rem] overflow-hidden shadow-soft relative flex flex-col min-h-[250px]">
               <div className="p-6 border-b border-border">
                 <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-3">
                   <Sparkles className="w-4 h-4 text-indigo-400" />
@@ -345,7 +512,7 @@ export default function DashboardPage() {
                 </h2>
               </div>
               <div className="flex-1 p-4 relative">
-                {isExpensesLoading ? (
+                {isExpensesLoading && !expenses ? (
                   <div className="absolute inset-0 flex justify-center items-center">
                     <Loader2 className="w-6 h-6 text-cyan-500 animate-spin" />
                   </div>
@@ -374,16 +541,19 @@ export default function DashboardPage() {
                     </PieChart>
                   </ResponsiveContainer>
                 ) : (
-                  <div className="h-full flex flex-col items-center justify-center text-center text-gray-500 py-6">
-                    <Wallet className="w-8 h-8 mb-3 opacity-20" />
-                    <p className="text-sm">{dashT.noExpenses}</p>
+                  <div className="absolute inset-0 flex flex-col items-center justify-center text-center p-6 bg-gradient-to-br from-slate-900/50 to-indigo-950/20 backdrop-blur-sm rounded-2xl border border-indigo-500/10 m-4">
+                    <div className="w-16 h-16 rounded-full bg-indigo-500/10 flex items-center justify-center mb-4 border border-indigo-500/20 shadow-[0_0_30px_rgba(99,102,241,0.2)]">
+                      <Wallet className="w-8 h-8 text-indigo-400 opacity-80" />
+                    </div>
+                    <p className="text-xs font-black uppercase tracking-widest text-white/80 mb-2">Chưa có dữ liệu chi tiêu</p>
+                    <p className="text-[10px] text-slate-400 leading-relaxed max-w-[200px]">Hãy thêm khoản chi phí đầu tiên trong Hành trình để AI bắt đầu phân tích biểu đồ tài chính cho bạn.</p>
                   </div>
                 )}
               </div>
             </motion.div>
 
             {/* Recent Expenses */}
-            <motion.div variants={itemVariants} className="bg-slate-900/40 border border-border rounded-[2rem] overflow-hidden shadow-soft">
+            <motion.div variants={itemVariants} className="bg-slate-900/40 border border-border rounded-[2.5rem] overflow-hidden shadow-soft">
               <div className="p-6 border-b border-border flex justify-between items-center">
                 <h2 className="text-xs font-black uppercase tracking-widest text-slate-500 flex items-center gap-3">
                   <Wallet className="w-4 h-4 text-indigo-400" />
@@ -394,7 +564,7 @@ export default function DashboardPage() {
                 </Link>
               </div>
               
-              {isExpensesLoading ? (
+              {isExpensesLoading && !expenses ? (
                 <div className="p-6 flex justify-center items-center h-full">
                   <Loader2 className="w-6 h-6 text-cyan-500 animate-spin" />
                 </div>
@@ -411,9 +581,13 @@ export default function DashboardPage() {
                   ))}
                 </div>
               ) : (
-                <div className="p-6 flex flex-col items-center justify-center min-h-[160px]">
-                  <Clock className="w-8 h-8 text-gray-500 mb-3" />
-                  <p className="text-sm text-gray-400 text-center">{dashT.noExpenses}</p>
+                <div className="p-8 flex flex-col items-center justify-center min-h-[180px] bg-slate-900/20 m-4 rounded-2xl border border-dashed border-slate-700">
+                  <div className="flex gap-2 mb-4 opacity-30">
+                    <div className="w-2 h-2 rounded-full bg-slate-500 animate-pulse"></div>
+                    <div className="w-2 h-2 rounded-full bg-slate-500 animate-pulse delay-75"></div>
+                    <div className="w-2 h-2 rounded-full bg-slate-500 animate-pulse delay-150"></div>
+                  </div>
+                  <p className="text-xs font-bold text-slate-500 uppercase tracking-widest text-center">Lịch sử trống</p>
                 </div>
               )}
             </motion.div>
@@ -585,6 +759,12 @@ export default function DashboardPage() {
           ? "Bạn có chắc chắn muốn xóa chuyến đi này không? Mọi dữ liệu liên quan sẽ mất sạch và không thể khôi phục." 
           : "Are you sure you want to delete this trip? All related data will be permanently removed and cannot be recovered."}
         confirmText={lang === "vi" ? "Xóa ngay" : "Delete Now"}
+      />
+      {/* Weather Detail Modal */}
+      <WeatherDetailModal 
+        isOpen={isWeatherDetailOpen}
+        onClose={() => setIsWeatherDetailOpen(false)}
+        city={weatherTargetCity}
       />
     </div>
   );
