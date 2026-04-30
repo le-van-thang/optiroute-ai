@@ -134,29 +134,38 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
     async jwt({ token, user, trigger, session }) {
+      // Chỉ sync DB khi user vừa đăng nhập lần đầu (user object có mặt)
+      // Không query DB mỗi lần kiểm tra session → tránh race condition khi restart
       if (user) {
         token.id = user.id;
         token.role = (user as any).role;
-      }
 
-      // Phase 26: Luôn đồng bộ ID thật và Role trực tiếp từ Database
-      // để loại bỏ lỗi Google trả về ID ảo (không khớp với UUID chuẩn)
-      if (token.email) {
-        const dbUser = await prisma.user.findUnique({ where: { email: token.email } });
-        if (dbUser) {
-          token.id = dbUser.id;
-          token.role = dbUser.role;
-          token.name = dbUser.name;
-          token.picture = dbUser.image;
+        // Phase 26: Sync ID thật và Role từ DB ngay khi login
+        if (token.email) {
+          try {
+            const dbUser = await prisma.user.findUnique({
+              where: { email: token.email as string },
+              select: { id: true, role: true, name: true, image: true }
+            });
+            if (dbUser) {
+              token.id = dbUser.id;
+              token.role = dbUser.role;
+              token.name = dbUser.name;
+              token.picture = dbUser.image;
+            }
+          } catch (err) {
+            console.warn("[Auth] JWT first-login DB sync failed, using provider data.", err);
+          }
         }
       }
 
-      // Sync session updates (name, image) to the JWT token
+      // Sync session updates (name, image, role) — triggered by useSession({ update })
       if (trigger === "update" && session) {
         if (session.user?.name) token.name = session.user.name;
         if (session.user?.image) token.picture = session.user.image;
         if (session.user?.role) token.role = session.user.role;
       }
+
       return token;
     },
     async session({ session, token }) {

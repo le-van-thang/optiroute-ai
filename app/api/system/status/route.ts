@@ -13,8 +13,13 @@ export async function GET() {
       }
     });
 
-    return NextResponse.json(config);
+    return NextResponse.json(config ?? { maintenanceMode: false, allowRegistration: true });
   } catch (error: any) {
-    return NextResponse.json({ error: error.message }, { status: 500 });
+    // DB không khả dụng — trả về JSON hợp lệ thay vì crash
+    console.warn("[System/Status] DB unavailable:", error.message);
+    return NextResponse.json(
+      { maintenanceMode: false, allowRegistration: true, _dbError: true },
+      { status: 200 }  // 200 để client không bị crash
+    );
   }
 }
