@@ -59,11 +59,12 @@ export default function DashboardPage() {
   
   // Premium Weather Widget State
   const [dashboardWeather, setDashboardWeather] = useState<any>(null);
-  const [weatherTargetCity, setWeatherTargetCity] = useState("Hà Nội");
+  const [weatherTargetCity, setWeatherTargetCity] = useState("");
   const [isWeatherDestination, setIsWeatherDestination] = useState(false);
   const [isWeatherPreview, setIsWeatherPreview] = useState(false); // true when previewing typed search
   const [isFetchingWeather, setIsFetchingWeather] = useState(false);
   const [userGpsLocation, setUserGpsLocation] = useState<{ city: string; lat: number; lng: number } | null>(null);
+  const [gpsStatus, setGpsStatus] = useState<'pending' | 'resolved' | 'error'>('pending');
   
   // Weather Detail Modal
   const [isWeatherDetailOpen, setIsWeatherDetailOpen] = useState(false);
@@ -94,50 +95,70 @@ export default function DashboardPage() {
   useEffect(() => {
     // Phase 1: Try GPS Geolocation for a truly personalized experience
     if ("geolocation" in navigator) {
-      navigator.geolocation.getCurrentPosition(async (position) => {
-        const { latitude, longitude } = position.coords;
-        try {
-          const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&types=place&limit=1`);
-          const data = await res.json();
-          if (data.features?.[0]) {
-            const cityName = data.features[0].text;
-            setUserGpsLocation({ city: cityName, lat: latitude, lng: longitude });
-            // If no search and no upcoming trip, show GPS weather
-            if (!prompt.trim() && (!trips || trips.length === 0)) {
-               fetchWeatherForCity(cityName, false, false);
+      // Set a fallback timeout in case GPS prompt is ignored
+      const fallbackTimer = setTimeout(() => {
+        setGpsStatus(prev => prev === 'pending' ? 'error' : prev);
+      }, 5000);
+
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          clearTimeout(fallbackTimer);
+          const { latitude, longitude } = position.coords;
+          try {
+            const res = await fetch(`https://api.mapbox.com/geocoding/v5/mapbox.places/${longitude},${latitude}.json?access_token=${process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN}&types=place&limit=1`);
+            const data = await res.json();
+            if (data.features?.[0]) {
+              const cityName = data.features[0].text;
+              setUserGpsLocation({ city: cityName, lat: latitude, lng: longitude });
             }
+          } catch (err) {
+            console.error("GPS Reverse Geocoding failed", err);
+          } finally {
+            setGpsStatus('resolved');
           }
-        } catch (err) {
-          console.error("GPS Reverse Geocoding failed", err);
-        }
-      });
+        },
+        () => {
+          clearTimeout(fallbackTimer);
+          setGpsStatus('error');
+        },
+        { timeout: 5000 }
+      );
+    } else {
+      setGpsStatus('error');
     }
   }, []);
 
   useEffect(() => {
-    // Priority 2: Trip Destination (if prompt is empty)
+    // Priority Resolution
     if (prompt.trim()) return;
 
-    if (trips && trips.length > 0 && trips[0].city) {
-      fetchWeatherForCity(trips[0].city, false, true);
-    } else if (userGpsLocation) {
+    // Wait until we have a definitive answer from both trips API and GPS
+    if (isTripsLoading || gpsStatus === 'pending') return;
+
+    // Priority 1: User's Actual GPS Location (Local Weather)
+    if (userGpsLocation) {
       fetchWeatherForCity(userGpsLocation.city, false, false);
-    } else {
-      // Final fallback
+    } 
+    // Priority 2: Upcoming Trip Destination
+    else if (trips && trips.length > 0 && trips[0].city) {
+      fetchWeatherForCity(trips[0].city, false, true);
+    } 
+    // Final Fallback
+    else {
       fetchWeatherForCity("Hà Nội", false, false);
     }
-  }, [trips, userGpsLocation]);
+  }, [trips, userGpsLocation, isTripsLoading, gpsStatus, prompt]);
 
   // Live weather preview when user types in search box (debounced 800ms)
   useEffect(() => {
     if (!prompt.trim() || prompt.trim().length < 3) {
-      // If search cleared, revert to trip-based or GPS weather
+      // If search cleared, revert back
       if (!isWeatherPreview) return;
       
-      if (trips && trips.length > 0 && trips[0].city) {
-        fetchWeatherForCity(trips[0].city, false, true);
-      } else if (userGpsLocation) {
+      if (userGpsLocation) {
         fetchWeatherForCity(userGpsLocation.city, false, false);
+      } else if (trips && trips.length > 0 && trips[0].city) {
+        fetchWeatherForCity(trips[0].city, false, true);
       } else {
         fetchWeatherForCity("Hà Nội", false, false);
       }
@@ -422,7 +443,7 @@ export default function DashboardPage() {
           </motion.div>
 
           {/* Right Column: AI, Weather & Expenses */}
-          <div className="grid grid-cols-1 gap-6">
+          <div className="flex flex-col gap-6 h-fit self-start w-full lg:-mt-[120px] relative z-20">
             
             {/* Premium Interactive Weather Environment */}
             {dashboardWeather && (
@@ -609,12 +630,12 @@ export default function DashboardPage() {
               initial={{ opacity: 0, scale: 0.9, y: 30 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 30 }}
-              className="relative w-full max-w-lg bg-[#0a1128]/90 border border-white/10 rounded-[3rem] shadow-[0_0_100px_rgba(79,70,229,0.2)] overflow-hidden"
+              className="relative w-full max-w-lg bg-[#0a1128]/90 border border-white/10 rounded-[2.5rem] shadow-[0_0_100px_rgba(79,70,229,0.2)] overflow-hidden flex flex-col max-h-[90vh]"
             >
               {/* Top Accent Bar */}
               <div className="absolute top-0 left-0 w-full h-1.5 bg-gradient-to-r from-indigo-500 via-cyan-500 to-indigo-500" />
               
-              <div className="px-10 py-8 border-b border-white/5 flex justify-between items-center relative">
+              <div className="px-8 py-6 border-b border-white/5 flex justify-between items-center relative shrink-0">
                 <div>
                   <h3 className="text-xl font-black uppercase tracking-tight text-white mb-1">{dashT.createTripTitle}</h3>
                   <p className="text-[10px] text-slate-500 font-bold uppercase tracking-widest leading-none">
@@ -629,8 +650,8 @@ export default function DashboardPage() {
                 </button>
               </div>
               
-              <form onSubmit={handleCreateTrip}>
-                <div className="p-10 space-y-8">
+              <form onSubmit={handleCreateTrip} className="flex flex-col min-h-0 overflow-hidden">
+                <div className="p-8 space-y-6 overflow-y-auto">
                   {error && (
                     <motion.p 
                       initial={{ opacity: 0, x: -10 }} animate={{ opacity: 1, x: 0 }}
@@ -652,9 +673,9 @@ export default function DashboardPage() {
                           autoFocus required 
                           value={aiPrompt} 
                           onChange={e => setAiPrompt(e.target.value)} 
-                          rows={4}
+                          rows={3}
                           placeholder={lang === "vi" ? "Ví dụ: Đi phượt khám phá Hà Giang 3 ngày, Nghỉ dưỡng ở Đà Lạt cùng người yêu, hay Food tour Sài Gòn..." : "E.g. 3-day adventure in Ha Giang, Relaxing in Da Lat, or Saigon Food Tour..."} 
-                          className="w-full px-6 py-5 bg-slate-950/50 border border-white/5 rounded-[2rem] text-white focus:bg-slate-950 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner resize-none leading-relaxed"
+                          className="w-full px-5 py-4 bg-slate-950/50 border border-white/5 rounded-[1.5rem] text-white focus:bg-slate-950 focus:border-indigo-500/50 focus:ring-4 focus:ring-indigo-500/5 focus:outline-none transition-all placeholder:text-slate-700 text-sm font-medium shadow-inner resize-none leading-relaxed"
                         />
                       </div>
                     </div>
@@ -713,7 +734,7 @@ export default function DashboardPage() {
                   </div>
                 </div>
 
-                <div className="px-10 py-8 border-t border-white/5 bg-slate-950/40 flex flex-col sm:flex-row justify-between items-center gap-6">
+                <div className="px-8 py-6 border-t border-white/5 bg-slate-950/40 flex flex-col sm:flex-row justify-between items-center gap-4 shrink-0">
                   <button 
                     type="button" 
                     onClick={() => setIsModalOpen(false)} 
@@ -726,7 +747,7 @@ export default function DashboardPage() {
                     whileTap={{ scale: 0.98 }}
                     disabled={isSubmitting} 
                     type="submit" 
-                    className="w-full sm:w-auto px-10 py-4 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white text-xs font-black uppercase tracking-[0.2em] rounded-[1.2rem] shadow-xl shadow-indigo-600/20 disabled:opacity-50 flex items-center justify-center gap-3 relative overflow-hidden group/save"
+                    className="w-full sm:w-auto px-8 py-3.5 bg-gradient-to-r from-indigo-600 to-indigo-500 text-white text-xs font-black uppercase tracking-[0.2em] rounded-xl shadow-xl shadow-indigo-600/20 disabled:opacity-50 flex items-center justify-center gap-2 relative overflow-hidden group/save"
                   >
                     <div className="absolute inset-0 bg-white/10 translate-y-full group-hover/save:translate-y-0 transition-transform duration-300" />
                     {isSubmitting ? (
