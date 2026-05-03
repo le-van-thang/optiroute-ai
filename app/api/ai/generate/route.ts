@@ -73,7 +73,7 @@ export async function POST(req: Request) {
 
     // --- STEP 1: Normalize & Check Cache ---
     const normalized = normalizePrompt(prompt);
-    const dayMatch = prompt.match(/(\d+)\s*(ngày|day|d)/i);
+    const dayMatch = prompt.match(/(\d+)\s*(ngày|day|d|n|ngay)/i);
     const requestedDays = dayMatch ? Math.min(parseInt(dayMatch[1]), 7) : 1; // Cap at 7 days
     
     // v9: bust cache to force fresh geocoding with new anchor strategy
@@ -145,6 +145,7 @@ ${weatherContext}
 RULES:
 - "city": main destination city name (string)
 - "days_count": ${requestedDays}
+- "budget_level": infer from user prompt (e.g., 4-5 stars/resort -> luxury, hostel/backpack -> cheap, else medium). Must be exactly "cheap", "medium", or "luxury"
 - "magazine_wiki": short intro (1 block, max 40 words per section, vi+en)
 - "suggested_places": EXACTLY ${totalItems} items total (${ITEMS_PER_DAY} per day × ${requestedDays} days)
 
@@ -169,6 +170,7 @@ JSON Schema:
 {
   "city": "string",
   "days_count": ${requestedDays},
+  "budget_level": "cheap|medium|luxury",
   "weather_warning": {"vi": "Cảnh báo thời tiết ngắn gọn nếu có thời tiết xấu (Bão, Mưa lớn, Mưa liên tục). Nếu thời tiết đẹp, để rỗng hoặc null", "en": "..."},
   "magazine_wiki": {
     "title": {"vi": "...", "en": "..."},

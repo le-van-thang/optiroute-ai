@@ -264,7 +264,7 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#020817] pt-24 pb-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
+    <div className="min-h-screen bg-[#020817] pt-6 pb-12 px-4 sm:px-6 lg:px-8 relative overflow-hidden">
       {/* Ambient Background Elements */}
       <div className="absolute top-[-10%] left-[-10%] w-[40%] h-[40%] bg-indigo-500/10 blur-[120px] rounded-full animate-pulse" />
       <div className="absolute bottom-[-10%] right-[-10%] w-[40%] h-[40%] bg-cyan-500/10 blur-[120px] rounded-full animate-pulse" style={{ animationDelay: '2s' }} />
@@ -443,7 +443,7 @@ export default function DashboardPage() {
           </motion.div>
 
           {/* Right Column: AI, Weather & Expenses */}
-          <div className="flex flex-col gap-6 h-fit self-start w-full lg:-mt-[120px] relative z-20">
+          <div className="flex flex-col gap-6 h-fit self-start w-full relative z-20">
             
             {/* Premium Interactive Weather Environment */}
             {dashboardWeather && (

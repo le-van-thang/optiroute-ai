@@ -2,6 +2,7 @@ export interface ProvinceInfo {
   id: string;
   intro: { vi: string; en: string };
   chips: { icon: string; vi: string; en: string }[];
+  landmarks: { vi: string; en: string }; // For placeholder
 }
 
 export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
@@ -10,6 +11,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Thủ đô ngàn năm văn hiến với nét đẹp cổ kính, nhịp sống thanh bình hòa quyện cùng sự hiện đại.",
       en: "A thousand-year-old capital blending ancient charm, peaceful pace, and modern vibrancy."
+    },
+    landmarks: {
+      vi: "VD: Hồ Hoàn Kiếm, Lăng Bác, Phố cổ Hà Nội...",
+      en: "E.g: Hoan Kiem Lake, Ho Chi Minh Mausoleum, Old Quarter..."
     },
     chips: [
       { icon: "🏛️", vi: "Phố cổ & Lăng Bác 1 ngày", en: "Old Quarter & Ho Chi Minh Mausoleum" },
@@ -25,6 +30,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Thành phố năng động nhất Việt Nam, nơi giao thoa văn hóa đặc sắc và nhịp sống không ngủ.",
       en: "Vietnam's most dynamic city, a melting pot of unique cultures and a lifestyle that never sleeps."
     },
+    landmarks: {
+      vi: "VD: Landmark 81, Dinh Độc Lập, Bến Nhà Rồng...",
+      en: "E.g: Landmark 81, Independence Palace, Ben Nha Rong Wharf..."
+    },
     chips: [
       { icon: "🌇", vi: "Ngắm thành phố từ Landmark 81", en: "Landmark 81 viewing deck" },
       { icon: "🍝", vi: "Food tour Quận 4 - Thiên đường ăn vặt", en: "District 4 food tour - Street food heaven" },
@@ -38,6 +47,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Thành phố đáng sống nhất Việt Nam với những cây cầu huyền thoại, bãi biển Mỹ Khê tuyệt đẹp và núi non hùng vĩ.",
       en: "Vietnam's most livable city with legendary bridges, beautiful My Khe beach, and majestic mountains."
+    },
+    landmarks: {
+      vi: "VD: Cầu Rồng, Bà Nà Hills, Ngũ Hành Sơn...",
+      en: "E.g: Dragon Bridge, Bana Hills, Marble Mountains..."
     },
     chips: [
       { icon: "🐉", vi: "Cầu Rồng & Cầu Tình Yêu đêm nay", en: "Dragon & Love Bridge tonight" },
@@ -53,6 +66,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Vùng đất di sản với Phố cổ Hội An lung linh đèn lồng và thánh địa Mỹ Sơn trầm mặc.",
       en: "A land of heritage with shimmering Hoi An Ancient Town and the silent My Son Sanctuary."
     },
+    landmarks: {
+      vi: "VD: Phố cổ Hội An, Thánh địa Mỹ Sơn, Biển An Bàng...",
+      en: "E.g: Hoi An Ancient Town, My Son Sanctuary, An Bang Beach..."
+    },
     chips: [
       { icon: "🏮", vi: "Phố cổ Hội An về đêm lung linh", en: "Shimmering Hoi An at night" },
       { icon: "🛶", vi: "Chèo thuyền thúng rừng dừa Bảy Mẫu", en: "Basket boat tour at Bay Mau forest" },
@@ -66,6 +83,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Xứ sở ngàn hoa với không khí se lạnh, những đồi thông xanh ngát và vẻ đẹp lãng mạn của Đà Lạt.",
       en: "The land of a thousand flowers with cool air, green pine hills, and the romantic beauty of Da Lat."
+    },
+    landmarks: {
+      vi: "VD: Hồ Xuân Hương, Thác Datanla, Dinh Bảo Đại...",
+      en: "E.g: Xuan Huong Lake, Datanla Falls, Bao Dai Palace..."
     },
     chips: [
       { icon: "🏕️", vi: "Cắm trại săn mây Đà Lạt", en: "Dalat cloud hunting & camping" },
@@ -81,6 +102,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Thiên đường biển đảo với vịnh Nha Trang xanh ngắt, cát trắng mịn và các khu nghỉ dưỡng cao cấp.",
       en: "A sea and island paradise with deep blue Nha Trang bay, fine white sand, and luxury resorts."
     },
+    landmarks: {
+      vi: "VD: Vịnh Nha Trang, Tháp Bà Ponagar, Hòn Mun...",
+      en: "E.g: Nha Trang Bay, Ponagar Tower, Hon Mun Island..."
+    },
     chips: [
       { icon: "🏖️", vi: "Tour 4 đảo & VinWonders Nha Trang", en: "4-island tour & VinWonders" },
       { icon: "🦞", vi: "Hải sản Bình Ba & Tắm bùn khoáng", en: "Binh Ba seafood & Mud bath" },
@@ -93,6 +118,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Nổi tiếng với đảo ngọc Phú Quốc tuyệt đẹp và quần đảo Nam Du hoang sơ.",
       en: "Famous for the stunning Pearl Island of Phu Quoc and the pristine Nam Du archipelago."
+    },
+    landmarks: {
+      vi: "VD: Bãi Sao Phú Quốc, Vinpearl Safari, Chợ đêm Phú Quốc...",
+      en: "E.g: Sao Beach Phu Quoc, Vinpearl Safari, Phu Quoc Night Market..."
     },
     chips: [
       { icon: "🏝️", vi: "Phú Quốc: Bãi Sao & Ngắm hoàng hôn", en: "Phu Quoc: Sao Beach & Sunset" },
@@ -107,6 +136,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Cố đô tĩnh lặng với kiến trúc cung đình đặc sắc, nhịp sống chậm rãi và ẩm thực tinh tế.",
       en: "The quiet former capital with unique royal architecture, a slow pace of life, and refined cuisine."
     },
+    landmarks: {
+      vi: "VD: Đại Nội Huế, Sông Hương, Chùa Thiên Mụ...",
+      en: "E.g: Hue Citadel, Huong River, Thien Mu Pagoda..."
+    },
     chips: [
       { icon: "🏯", vi: "Đại Nội Huế & Các lăng tẩm hoàng gia", en: "Hue Imperial City & Royal Tombs" },
       { icon: "🛶", vi: "Nghe ca Huế trên sông Hương", en: "Listen to Hue songs on Huong River" },
@@ -119,6 +152,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Sở hữu kỳ quan thiên nhiên thế giới Vịnh Hạ Long cùng những hòn đảo kỳ vĩ.",
       en: "Home to the world natural wonder of Ha Long Bay and its majestic islands."
+    },
+    landmarks: {
+      vi: "VD: Vịnh Hạ Long, Núi Yên Tử, Đảo Cô Tô...",
+      en: "E.g: Ha Long Bay, Yen Tu Mountain, Co To Island..."
     },
     chips: [
       { icon: "🚢", vi: "Du thuyền ngủ đêm trên Vịnh Hạ Long", en: "Overnight cruise on Ha Long Bay" },
@@ -133,6 +170,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Vùng núi cao hùng vĩ với đỉnh Fansipan - nóc nhà Đông Dương và thị trấn Sapa mờ sương.",
       en: "Majestic highlands with Fansipan peak - the roof of Indochina and the misty Sapa town."
     },
+    landmarks: {
+      vi: "VD: Đỉnh Fansipan, Bản Cát Cát, Ruộng bậc thang Mường Hoa...",
+      en: "E.g: Fansipan Peak, Cat Cat Village, Muong Hoa Terraces..."
+    },
     chips: [
       { icon: "🏔️", vi: "Chinh phục đỉnh Fansipan bằng cáp treo", en: "Conquer Fansipan peak by cable car" },
       { icon: "🎋", vi: "Trekking bản Cát Cát & Tả Van", en: "Trekking Cat Cat & Ta Van villages" },
@@ -145,6 +186,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Được mệnh danh là 'Hạ Long trên cạn' với danh thắng Tràng An và Tam Cốc Bích Động.",
       en: "Known as 'Ha Long Bay on land' with Trang An landscape and Tam Coc Bich Dong."
+    },
+    landmarks: {
+      vi: "VD: Tràng An, Tam Cốc, Chùa Bái Đính...",
+      en: "E.g: Trang An, Tam Coc, Bai Dinh Pagoda..."
     },
     chips: [
       { icon: "🛶", vi: "Thuyền Tràng An & Phim trường Kong", en: "Trang An boat tour & Kong film set" },
@@ -159,6 +204,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Vùng đất địa đầu tổ quốc với những cung đường đèo hiểm trở và cao nguyên đá hùng vĩ.",
       en: "The country's northern frontier with rugged mountain passes and majestic karst plateaus."
     },
+    landmarks: {
+      vi: "VD: Đèo Mã Pì Lèng, Cột cờ Lũng Cú, Dinh họ Vương...",
+      en: "E.g: Ma Pi Leng Pass, Lung Cu Flagpole, Vuong Palace..."
+    },
     chips: [
       { icon: "🏍️", vi: "Chinh phục đèo Mã Pì Lèng & Sông Nho Quế", en: "Ma Pi Leng Pass & Nho Que River" },
       { icon: "⛰️", vi: "Dinh họ Vương & Cột cờ Lũng Cú", en: "Vuong Palace & Lung Cu Flagpole" },
@@ -171,6 +220,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
     intro: {
       vi: "Điểm đến nghỉ dưỡng biển lý tưởng gần Sài Gòn với những bãi tắm trải dài.",
       en: "Ideal seaside resort destination near Saigon with long stretches of beaches."
+    },
+    landmarks: {
+      vi: "VD: Tượng Chúa Kitô Vua, Bãi Sau, Côn Đảo...",
+      en: "E.g: Christ the King Statue, Back Beach, Con Dao Island..."
     },
     chips: [
       { icon: "🏖️", vi: "Tắm biển Bãi Sau & Bãi Trước", en: "Beach day at Back Beach & Front Beach" },
@@ -185,6 +238,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Thủ phủ miền Tây sông nước với chợ nổi Cái Răng nhộn nhịp và những vườn trái cây trĩu quả.",
       en: "The capital of the Mekong Delta with bustling Cai Rang floating market and fruit orchards."
     },
+    landmarks: {
+      vi: "VD: Chợ nổi Cái Răng, Bến Ninh Kiều, Vườn Mỹ Khánh...",
+      en: "E.g: Cai Rang Floating Market, Ninh Kieu Wharf, My Khanh Garden..."
+    },
     chips: [
       { icon: "🛶", vi: "Chợ nổi Cái Răng lúc sáng sớm", en: "Early morning Cai Rang floating market" },
       { icon: "🌳", vi: "Thăm vườn trái cây Mỹ Khánh", en: "Visit My Khanh fruit orchard" },
@@ -198,6 +255,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       vi: "Xứ võ với vẻ đẹp hoang sơ của Quy Nhơn, Kỳ Co - Eo Gió và tháp Chăm cổ.",
       en: "The land of martial arts with the pristine beauty of Quy Nhon, Ky Co - Eo Gio, and Cham towers."
     },
+    landmarks: {
+      vi: "VD: Kỳ Co, Eo Gió, Tháp Đôi Quy Nhơn...",
+      en: "E.g: Ky Co, Eo Gio, Twin Towers Quy Nhon..."
+    },
     chips: [
       { icon: "🏖️", vi: "Kỳ Co - Eo Gió: Maldives của Việt Nam", en: "Ky Co - Eo Gio: Vietnam's Maldives" },
       { icon: "🏯", vi: "Tháp Đôi & Bảo tàng Quang Trung", en: "Twin Towers & Quang Trung Museum" },
@@ -205,4 +266,10 @@ export const PROVINCE_DATA: Record<string, ProvinceInfo> = {
       { icon: "🍲", vi: "Thưởng thức nem nướng & Bún chả cá", en: "Enjoy grilled spring rolls & Fish cake noodles" }
     ]
   }
+};
+
+/** Default placeholder when no province is selected */
+export const DEFAULT_LANDMARK_PLACEHOLDER = {
+  vi: "VD: Cầu Rồng Đà Nẵng, Hồ Hoàn Kiếm...",
+  en: "E.g: Dragon Bridge Da Nang, Hoan Kiem Lake..."
 };
