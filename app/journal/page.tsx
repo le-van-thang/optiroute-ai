@@ -189,7 +189,7 @@ export default function JournalPage() {
   if (!isMounted) return null;
 
   return (
-    <div className="min-h-screen bg-[#020617] pt-24 pb-32 px-4 sm:px-6 relative overflow-hidden">
+    <div className="min-h-screen bg-[#020617] pt-6 pb-32 px-4 sm:px-6 relative overflow-hidden">
       {/* Background Texture (Scrapbook Feel) */}
       <div className="absolute inset-0 opacity-[0.03] pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/p6.png')]" />
 

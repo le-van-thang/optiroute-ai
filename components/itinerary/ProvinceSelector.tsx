@@ -26,8 +26,12 @@ export const ProvinceSelector = ({ selected, onSelect, lang }: ProvinceSelectorP
   const [searchTerm, setSearchTerm] = useState("");
   const dropdownRef = useRef<HTMLDivElement>(null);
 
+  const removeAccents = (str: string) => {
+    return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D');
+  };
+
   const filtered = VIETNAM_PROVINCES.filter(p => 
-    p.toLowerCase().includes(searchTerm.toLowerCase())
+    removeAccents(p.toLowerCase()).includes(removeAccents(searchTerm.toLowerCase()))
   );
 
   useEffect(() => {

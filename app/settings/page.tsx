@@ -120,7 +120,7 @@ export default function SettingsPage() {
   ];
 
   return (
-    <div className="min-h-screen bg-[#0a1128] pt-24 pb-12 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-[#0a1128] pt-6 pb-12 px-4 sm:px-6 lg:px-8">
       <div className="max-w-4xl mx-auto">
         <header className="mb-12">
           <div className="flex items-center gap-4 mb-2">

@@ -573,8 +573,8 @@ export default function SocialHub() {
   };
 
   return (
-    <div className="fixed inset-0 pt-[100px] pb-8 pl-8 pr-44 bg-[#070b14] overflow-hidden">
-      <div className="h-full w-full max-w-[1550px] flex bg-slate-900 border border-white/10 rounded-[40px] overflow-hidden relative shadow-2xl">
+    <div className="h-[calc(100vh-56px)] bg-[#020817] p-4 lg:p-6 lg:pr-24 overflow-hidden flex justify-center">
+      <div className="h-full w-full max-w-[1550px] flex bg-slate-900/50 border border-white/5 rounded-[32px] overflow-hidden relative shadow-2xl backdrop-blur-xl">
         {/* Sidebar */}
         <div className="w-[320px] hidden lg:flex flex-col border-r border-white/5 bg-slate-950/40">
           <div className="p-6 pt-10">
